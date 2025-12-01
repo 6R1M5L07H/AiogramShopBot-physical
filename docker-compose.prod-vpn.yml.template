@@ -1,0 +1,163 @@
+# ============================================================================
+# Production Docker Compose Configuration with VPN (AirVPN)
+# ============================================================================
+#
+# PRODUCTION DEPLOYMENT with:
+# - Gluetun VPN container (AirVPN with port forwarding)
+# - External Caddy reverse proxy (caddy network) for HTTPS
+# - Bot running through VPN tunnel (anonymous Telegram API access)
+# - Production-optimized bot configuration
+# - Redis with authentication
+# - Automated restarts
+# - Volume persistence for data and backups
+#
+# ARCHITECTURE:
+# Telegram → Caddy (external) → Gluetun (caddy network) → Bot (network_mode: service:gluetun)
+# Bot → VPN → Telegram API (outgoing traffic anonymous)
+#
+# PREREQUISITES:
+# 1. Copy environment template: cp .env.prod-vpn.template .env
+# 2. Fill in all required values in .env (especially VPN credentials)
+# 3. Get AirVPN config files from https://airvpn.org/generator/
+#    - Login to AirVPN.org
+#    - Go to Config Generator: https://airvpn.org/generator/
+#    - Select: OpenVPN, port 443 UDP, enable "Separate keys/certs"
+#    - Choose server with port forwarding support
+#    - Download config and extract to ./vpn/airvpn.conf
+# 4. Ensure external Caddy container is running with caddy network
+# 5. Update Caddy label below with your domain/IP (line 60)
+#
+# USAGE:
+# Start:  docker-compose -f docker-compose.prod-vpn.yml up -d
+# Logs:   docker-compose -f docker-compose.prod-vpn.yml logs -f gluetun
+# Stop:   docker-compose -f docker-compose.prod-vpn.yml down
+#
+# VPN STATUS:
+# Check VPN IP:         docker-compose -f docker-compose.prod-vpn.yml exec gluetun wget -qO- https://api.ipify.org
+# Check Forwarded Port: docker-compose -f docker-compose.prod-vpn.yml exec gluetun cat /tmp/gluetun/forwarded_port
+# Test Webhook:         curl https://<your-domain>.sslip.io/health
+#
+# SECURITY NOTES:
+# - All bot API requests go through VPN (Telegram sees only VPN IP)
+# - Built-in kill switch: No traffic without VPN connection
+# - Incoming webhooks via Caddy reverse proxy (HTTPS)
+# - Health checks ensure VPN is always connected
+#
+# ============================================================================
+
+services:
+  # VPN Container - All bot traffic routes through this
+  # Also acts as reverse proxy target for Caddy
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: shopbot-gluetun-prod
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      # Bot internal port (for Caddy reverse proxy)
+      - "5000:5000"
+      # Redis port (internal access)
+      - "6379:6379"
+    labels:
+      # IMPORTANT: Replace with your actual domain or VPN IP with sslip.io
+      # Examples:
+      #   - bot.yourdomain.com
+      #   - <VPN-EXIT-IP>.sslip.io (get VPN IP with: docker exec gluetun wget -qO- https://api.ipify.org)
+      caddy: https://YOUR-DOMAIN-OR-VPN-IP.sslip.io
+      caddy.reverse_proxy: "{{upstreams 5000}}"
+    environment:
+      # VPN Provider Configuration
+      - VPN_SERVICE_PROVIDER=custom
+      - VPN_TYPE=openvpn
+
+      # OpenVPN Configuration (from .env)
+      - OPENVPN_CUSTOM_CONFIG=/gluetun/custom.conf
+      - OPENVPN_USER=${AIRVPN_USERNAME}
+      - OPENVPN_PASSWORD=${AIRVPN_PASSWORD}
+
+      # Port Forwarding (AirVPN supports this)
+      - VPN_PORT_FORWARDING=on
+      - VPN_PORT_FORWARDING_PROVIDER=custom
+
+      # Firewall & Kill Switch
+      # Allow Docker internal network communication
+      - FIREWALL_OUTBOUND_SUBNETS=172.16.0.0/12,192.168.0.0/16,10.0.0.0/8
+      - FIREWALL_VPN_INPUT_PORTS=5000
+
+      # Timezone
+      - TZ=Europe/Berlin
+
+      # Health check configuration
+      - HEALTH_VPN_DURATION_INITIAL=30s
+
+      # Logging
+      - LOG_LEVEL=info
+    volumes:
+      # Mount AirVPN config file
+      - ./vpn/airvpn.conf:/gluetun/custom.conf:ro
+      # Store forwarded port info
+      - gluetun_data:/tmp/gluetun
+    restart: always
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "https://api.ipify.org"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - caddy
+      - shopbot_network
+
+  # Bot Container - Runs through VPN network
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shopbot-prod
+    network_mode: "service:gluetun"  # All traffic through VPN
+    env_file:
+      - .env
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    volumes:
+      # Database and data directory
+      - ./data:/bot/data
+      # Backup directory (bind mount for direct access via cron/rsync)
+      - ./backups:/bot/backups
+    command: ["python", "-u", "run.py"]
+    restart: always
+    # Note: healthcheck via HTTP not possible due to network_mode: service
+    # Health is implicitly checked via gluetun container health
+
+  # Redis Container - Accessible through VPN network
+  redis:
+    image: redis:7-alpine
+    container_name: shopbot-redis-prod
+    network_mode: "service:gluetun"  # Share VPN network
+    command:
+      - /bin/sh
+      - -c
+      - redis-server --requirepass "${REDIS_PASSWORD:?REDIS_PASSWORD variable is not set}"
+    env_file:
+      - .env
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    volumes:
+      - redis_data:/data
+    restart: always
+
+volumes:
+  redis_data:
+    driver: local
+  gluetun_data:
+    driver: local
+
+networks:
+  shopbot_network:
+    driver: bridge
+  caddy:
+    external: true
