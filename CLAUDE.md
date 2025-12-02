@@ -376,3 +376,4 @@ Use `/finalize` to complete a feature branch:
 - programmieren und dokumentieren auf englisch, kommunizieren mit dem user auf deutsch
 - keine direkten Pushes auf Develop, außer, der User ordnet es so an; Develop-branch ist an das Hauptverzeichnis gebunden; feature branches sind an working trees gebunden und leben nur so lange, wie der branch existiert
 - kein push direkt auf develop - immer über PR!
+- magic strings sind eine schwäche von dir => vermeide sie bitte, es sei denn, du findest sehr gute Gründe dagegen
