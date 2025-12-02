@@ -4,7 +4,29 @@ This directory contains AirVPN OpenVPN configuration files for anonymous bot ope
 
 ## Setup Instructions
 
-### 1. Get AirVPN Configuration
+### 1. Create Separate Devices (Recommended)
+
+AirVPN supports **Device Management** - create separate devices for production and staging:
+
+**Why separate devices?**
+- Independent credentials per environment
+- Revoke one device without affecting others
+- Better audit logs (track which environment connects when)
+- Security isolation
+
+**Steps:**
+1. Login to [AirVPN Client Area](https://airvpn.org/client/)
+2. Go to **Devices** section
+3. Click **"Create New Device"**
+4. Create devices:
+   - Device name: `telegram-bot-production`
+   - Device name: `telegram-bot-staging`
+5. Each device gets unique **Username** and **Password**
+6. Save credentials securely (different .env files)
+
+### 2. Get AirVPN Configuration
+
+**For each environment (prod/staging):**
 
 1. Login to [AirVPN](https://airvpn.org/)
 2. Go to [Config Generator](https://airvpn.org/generator/)
@@ -12,47 +34,103 @@ This directory contains AirVPN OpenVPN configuration files for anonymous bot ope
    - **Protocol**: OpenVPN
    - **Port**: 443 UDP (recommended) or 443 TCP
    - **Keys/Certs**: Enable "Separate keys/certs"
+   - **Device**: Select your device (e.g., `telegram-bot-production`)
    - **Server**: Choose a server with **port forwarding support**
      - Check server details page for port forwarding availability
      - Recommended: Servers in Netherlands, Romania, or Switzerland
 4. Download the generated config file
 
-### 2. Install Configuration
+### 3. Install Configurations and Certificates
 
-Save the downloaded config file as:
+AirVPN provides certificates when downloading the config. Extract the downloaded ZIP:
+
+**File structure:**
 ```
-./vpn/airvpn.conf
+vpn/
+├── README.md
+├── airvpn.conf           # OpenVPN config
+└── certs/
+    ├── user.crt          # User certificate
+    ├── user.key          # Private key (SENSITIVE!)
+    ├── ca.crt            # Certificate Authority
+    └── ta.key            # TLS authentication key
 ```
 
-**Important**: The file MUST be named `airvpn.conf` (referenced in docker-compose-*-vpn.yml files).
+**Setup:**
+```bash
+# Create certs directory
+mkdir -p vpn/certs
 
-### 3. Verify Configuration
+# Extract certificates from AirVPN download
+unzip AirVPN_*.zip -d /tmp/airvpn
 
-Check that the file contains:
+# Copy files to vpn directory
+cp /tmp/airvpn/*.conf vpn/airvpn.conf
+cp /tmp/airvpn/user.crt vpn/certs/
+cp /tmp/airvpn/user.key vpn/certs/
+cp /tmp/airvpn/ca.crt vpn/certs/
+cp /tmp/airvpn/ta.key vpn/certs/
+
+# CRITICAL: Set strict file permissions
+chmod 600 vpn/certs/*.key              # Private keys: owner read/write only
+chmod 644 vpn/certs/*.crt              # Certificates: owner read/write, group/others read
+chmod 600 vpn/airvpn.conf              # Config: owner read/write only
+chmod 700 vpn/certs                    # Directory: owner access only
+
+# Verify permissions
+ls -la vpn/certs/
+# Expected:
+# drwx------  user.key (600)
+# -rw-r--r--  user.crt (644)
+# -rw-r--r--  ca.crt (644)
+# drwx------  ta.key (600)
+```
+
+### 4. Update OpenVPN Config
+
+Edit `vpn/airvpn.conf` to use certificate paths that work inside the Gluetun container:
+
+```conf
+# Find these lines and update paths:
+cert /gluetun/certs/user.crt
+key /gluetun/certs/user.key
+ca /gluetun/certs/ca.crt
+tls-auth /gluetun/certs/ta.key 1
+```
+
+**Important**: Paths must start with `/gluetun/certs/` (Docker mount point).
+
+### 5. Verify Configuration
+
+Check that `vpn/airvpn.conf` contains:
 ```
 client
 dev tun
 proto udp
 remote <server>.airvpn.org 443
-...
+cert /gluetun/certs/user.crt
+key /gluetun/certs/user.key
+ca /gluetun/certs/ca.crt
+tls-auth /gluetun/certs/ta.key 1
 ```
 
-### 4. Get OpenVPN Credentials
+### 6. Configure Environment Variables
 
-Your OpenVPN credentials are different from your website login:
+**Certificate-based auth (RECOMMENDED):**
 
-1. Go to [AirVPN Client Area](https://airvpn.org/client/)
-2. Find section: **OpenVPN Credentials**
-3. Copy:
-   - **Username**: `AIRVPN_USERNAME` (in .env)
-   - **Password**: `AIRVPN_PASSWORD` (in .env)
-
-### 5. Update Environment Variables
-
-In your `.env` file:
+Leave `AIRVPN_USERNAME` and `AIRVPN_PASSWORD` **empty** in `.env`:
 ```bash
-AIRVPN_USERNAME=your_openvpn_username
-AIRVPN_PASSWORD=your_openvpn_password
+# Certificate-based auth - leave empty
+AIRVPN_USERNAME=
+AIRVPN_PASSWORD=
+```
+
+**Username/Password auth (Alternative):**
+
+Only use if NOT using certificates:
+```bash
+AIRVPN_USERNAME=telegram-bot-production_user
+AIRVPN_PASSWORD=your_password
 ```
 
 ## Port Forwarding
@@ -77,6 +155,36 @@ docker-compose -f docker-compose.prod-vpn.yml exec gluetun wget -qO- https://api
 
 ## Security Considerations
 
+### File Permissions (CRITICAL)
+
+**Private keys MUST have restrictive permissions:**
+```bash
+# Check current permissions
+ls -la vpn/certs/
+
+# Fix if needed
+chmod 700 vpn/                         # Directory: owner only
+chmod 700 vpn/certs/                   # Certs directory: owner only
+chmod 600 vpn/certs/*.key              # Private keys: owner read/write only
+chmod 600 vpn/airvpn.conf              # Config: owner read/write only
+chmod 644 vpn/certs/*.crt              # Certificates: owner read/write, others read
+
+# Verify (should show -rw------- for .key files)
+stat -c '%a %n' vpn/certs/*
+```
+
+**Why this matters:**
+- Private keys with wrong permissions → SSH/OpenVPN will refuse to use them
+- Other users on the system could read your keys
+- Compromised keys = full VPN access as your device
+
+**Production checklist:**
+- [ ] `vpn/certs/*.key` has 600 permissions
+- [ ] `vpn/certs/` directory has 700 permissions
+- [ ] `.env` file has 600 permissions
+- [ ] No keys committed to git
+- [ ] Regular key rotation schedule
+
 ### Kill Switch
 Gluetun includes a built-in kill switch:
 - If VPN connection drops, ALL network traffic is blocked
@@ -92,8 +200,11 @@ Configured in docker-compose:
 
 ### Config File Security
 - Never commit `airvpn.conf` to git (added to .gitignore)
+- Never commit certificates to git (added to .gitignore)
 - Store credentials securely (Vault, AWS Secrets Manager in production)
-- Rotate credentials if compromised
+- Rotate device credentials if compromised
+- Use separate devices for prod/staging
+- Revoke old devices in AirVPN Client Area
 
 ## Troubleshooting
 

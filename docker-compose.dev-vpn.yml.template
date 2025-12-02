@@ -82,6 +82,8 @@ services:
     volumes:
       # Mount AirVPN config file
       - ./vpn/airvpn.conf:/gluetun/custom.conf:ro
+      # Mount certificates (certificate-based authentication)
+      - ./vpn/certs:/gluetun/certs:ro
       # Store forwarded port info
       - gluetun_data:/tmp/gluetun
     restart: unless-stopped
