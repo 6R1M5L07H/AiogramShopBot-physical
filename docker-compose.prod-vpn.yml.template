@@ -79,9 +79,11 @@ services:
       - OPENVPN_USER=${AIRVPN_USERNAME}
       - OPENVPN_PASSWORD=${AIRVPN_PASSWORD}
 
-      # Port Forwarding (AirVPN supports this)
-      - VPN_PORT_FORWARDING=on
-      - VPN_PORT_FORWARDING_PROVIDER=custom
+      # Port Forwarding
+      # Note: Gluetun's automatic port forwarding doesn't support AirVPN
+      # AirVPN assigns a static forwarded port in their client area
+      # Check your forwarded port at: https://airvpn.org/ports/
+      # Then expose that port in the ports section above
 
       # Firewall & Kill Switch
       # Allow Docker internal network communication

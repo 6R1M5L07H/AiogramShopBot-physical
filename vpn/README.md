@@ -165,23 +165,43 @@ This will automatically update:
 
 ## Port Forwarding
 
-AirVPN automatically assigns a forwarded port when you connect. This port is used for incoming webhook connections.
+AirVPN provides static port forwarding, but it must be configured manually (Gluetun's automatic port forwarding doesn't support custom providers).
 
-**How it works:**
-1. Bot starts → Gluetun connects to AirVPN
-2. AirVPN assigns a random port (e.g., 51234)
-3. Port stored in: `/tmp/gluetun/forwarded_port` (inside container)
-4. Check with: `docker-compose -f docker-compose.prod-vpn.yml exec gluetun cat /tmp/gluetun/forwarded_port`
+**Setup:**
 
-**Webhook URL:**
-```
-https://<vpn-exit-ip>.sslip.io:<forwarded-port>/
-```
+1. **Get your forwarded port from AirVPN:**
+   - Login to [AirVPN](https://airvpn.org/)
+   - Go to [Ports Section](https://airvpn.org/ports/)
+   - Request a forwarded port if you don't have one
+   - Note the port number (e.g., `51234`)
 
-Get VPN exit IP:
-```bash
-docker-compose -f docker-compose.prod-vpn.yml exec gluetun wget -qO- https://api.ipify.org
-```
+2. **Update docker-compose to expose the port:**
+
+   Edit `docker-compose.prod-vpn.yml`:
+   ```yaml
+   gluetun:
+     ports:
+       - "5100:5100"        # Bot port
+       - "6479:6379"        # Redis
+       - "51234:51234"      # Add your AirVPN forwarded port here
+   ```
+
+3. **Update Firewall rules:**
+   ```yaml
+   environment:
+     - FIREWALL_VPN_INPUT_PORTS=5100,51234  # Add forwarded port
+   ```
+
+4. **Get VPN exit IP:**
+   ```bash
+   docker-compose -f docker-compose.prod-vpn.yml exec gluetun wget -qO- https://api.ipify.org
+   ```
+
+5. **Webhook URL:**
+   ```
+   https://<vpn-exit-ip>.sslip.io:51234/
+   ```
+   Or use internal Caddy reverse proxy on port 5100 (HTTPS via Caddy on port 443)
 
 ## Security Considerations
 
