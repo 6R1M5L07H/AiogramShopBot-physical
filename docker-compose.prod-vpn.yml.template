@@ -154,7 +154,9 @@ services:
 volumes:
   redis_data:
     driver: local
-  gluetun_data:
+  caddy_data:
+    driver: local
+  caddy_config:
     driver: local
 
 networks:

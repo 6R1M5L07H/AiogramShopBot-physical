@@ -151,45 +151,103 @@ Development (VPN):      Bot: 5001, Redis: 6379
 - Staging VPN: `shopbot-gluetun-stg-vpn`, `shopbot-stg-vpn`, `shopbot-redis-stg-vpn`
 - Development VPN: `shopbot-gluetun-dev-vpn`, `shopbot-dev-vpn`, `shopbot-redis-dev-vpn`
 
-## Port Forwarding
+## Architecture: Complete VPN Anonymity
 
-AirVPN provides static port forwarding, but it must be configured manually (Gluetun's automatic port forwarding doesn't support custom providers).
+The VPN setup routes **ALL traffic** through AirVPN to ensure Telegram sees only the VPN IP:
 
-**Setup:**
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Inbound (Webhook):                                          │
+│ Telegram → AirVPN:17938 → Gluetun → Caddy:443 → Bot:5100  │
+│                                                             │
+│ Outbound (API Calls):                                       │
+│ Bot:5100 → Caddy → Gluetun → AirVPN → Telegram API        │
+└─────────────────────────────────────────────────────────────┘
+
+Result: Telegram sees ONLY the VPN IP (both directions)
+```
+
+**Key Components:**
+
+1. **Gluetun Container**: VPN client with kill switch
+2. **Caddy Container**: HTTPS reverse proxy running THROUGH VPN
+3. **Bot Container**: Application using VPN network stack
+4. **AirVPN Port Forwarding**: Receives incoming webhook traffic
+
+**Why a separate Caddy?**
+
+The system uses a **dedicated Caddy instance** for the bot that runs through VPN:
+
+- Main server Caddy (`lucaslorenz-caddy`): Other services on port 443
+- Bot Caddy (`shopbot-caddy-prod-vpn`): VPN traffic on port 17938
+- No port conflicts, complete isolation
+
+## Port Forwarding Setup
+
+AirVPN provides static port forwarding for incoming webhook traffic.
+
+**Steps:**
 
 1. **Get your forwarded port from AirVPN:**
    - Login to [AirVPN](https://airvpn.org/)
    - Go to [Ports Section](https://airvpn.org/ports/)
    - Request a forwarded port if you don't have one
-   - Note the port number (e.g., `51234`)
+   - Note the port number (e.g., `17938`)
 
-2. **Update docker-compose to expose the port:**
+2. **Update docker-compose.prod-vpn.yml:**
 
-   Edit `docker-compose.prod-vpn.yml`:
    ```yaml
    gluetun:
      ports:
-       - "5100:5100"        # Bot port
-       - "6479:6379"        # Redis
-       - "51234:51234"      # Add your AirVPN forwarded port here
+       - "17938:443"  # Replace 17938 with YOUR AirVPN port
    ```
 
-3. **Update Firewall rules:**
-   ```yaml
-   environment:
-     - FIREWALL_VPN_INPUT_PORTS=5100,51234  # Add forwarded port
-   ```
-
-4. **Get VPN exit IP:**
+3. **Get VPN exit IP:**
    ```bash
    docker-compose -f docker-compose.prod-vpn.yml exec gluetun wget -qO- https://api.ipify.org
    ```
 
-5. **Webhook URL:**
+4. **Update Caddyfile with VPN IP:**
+
+   Edit `Caddyfile`:
    ```
-   https://<vpn-exit-ip>.sslip.io:51234/
+   https://37.46.196.22.sslip.io {  # Replace with YOUR VPN IP
+       reverse_proxy localhost:5100
+   }
    ```
-   Or use internal Caddy reverse proxy on port 5100 (HTTPS via Caddy on port 443)
+
+5. **Webhook URL for Telegram:**
+   ```
+   https://<your-vpn-ip>.sslip.io:17938/
+   ```
+
+   Example: `https://37.46.196.22.sslip.io:17938/`
+
+## Migration from Old Architecture
+
+If you have an existing `docker-compose.prod-vpn.yml`, use the migration script:
+
+```bash
+# Make script executable
+chmod +x vpn/migrate-to-caddy-through-vpn.sh
+
+# Run migration (creates backup automatically)
+./vpn/migrate-to-caddy-through-vpn.sh
+
+# Review changes
+diff docker-compose.prod-vpn.yml.backup-* docker-compose.prod-vpn.yml
+
+# Apply changes
+docker-compose -f docker-compose.prod-vpn.yml down
+docker-compose -f docker-compose.prod-vpn.yml up -d
+```
+
+The script automatically:
+- Detects your AirVPN forwarded port
+- Updates network names for isolation
+- Configures Caddy through VPN
+- Creates Caddyfile with detected settings
+- Backs up your old config
 
 ## Security Considerations
 
