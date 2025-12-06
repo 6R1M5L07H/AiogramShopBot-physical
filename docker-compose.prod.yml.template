@@ -32,7 +32,7 @@ services:
     environment:
       - CADDY_INGRESS_NETWORKS=shopbot_network
     networks:
-      - shopbot_network
+      - shopbot_network_prod
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - caddy_data:/data
@@ -59,7 +59,7 @@ services:
       - caddy
       - redis
     networks:
-      - shopbot_network
+      - shopbot_network_prod
     ports:
       - "5000:5000"
     expose:
@@ -93,7 +93,7 @@ services:
       - redis_data:/data
     restart: always
     networks:
-      - shopbot_network
+      - shopbot_network_prod
     healthcheck:
       test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
       interval: 10s
@@ -109,5 +109,5 @@ volumes:
     driver: local
 
 networks:
-  shopbot_network:
+  shopbot_network_prod:
     driver: bridge

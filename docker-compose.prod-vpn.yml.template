@@ -4,16 +4,18 @@
 #
 # PRODUCTION DEPLOYMENT with:
 # - Gluetun VPN container (AirVPN with port forwarding)
-# - External Caddy reverse proxy (caddy network) for HTTPS
+# - Caddy reverse proxy running THROUGH VPN for complete anonymity
 # - Bot running through VPN tunnel (anonymous Telegram API access)
 # - Production-optimized bot configuration
 # - Redis with authentication
 # - Automated restarts
 # - Volume persistence for data and backups
 #
-# ARCHITECTURE:
-# Telegram → Caddy (external) → Gluetun (caddy network) → Bot (network_mode: service:gluetun)
-# Bot → VPN → Telegram API (outgoing traffic anonymous)
+# ARCHITECTURE (FULL VPN ANONYMITY):
+# Telegram → AirVPN Port Forward → Gluetun:FORWARDED_PORT → Caddy:443 → Bot:5100
+# Bot → Gluetun → VPN → Telegram API
+#
+# RESULT: Telegram sees ONLY the VPN IP (both inbound and outbound)
 #
 # PREREQUISITES:
 # 1. Copy environment template: cp .env.prod-vpn.template .env
@@ -24,30 +26,29 @@
 #    - Select: OpenVPN, port 443 UDP, enable "Separate keys/certs"
 #    - Choose server with port forwarding support
 #    - Download config and extract to ./vpn/airvpn.conf
-# 4. Ensure external Caddy container is running with caddy network
-# 5. Update Caddy label below with your domain/IP (line 60)
+# 4. Request port forwarding at https://airvpn.org/ports/
+# 5. Update AIRVPN_FORWARDED_PORT below with your assigned port (line 64)
 #
 # USAGE:
 # Start:  docker-compose -f docker-compose.prod-vpn.yml up -d
-# Logs:   docker-compose -f docker-compose.prod-vpn.yml logs -f gluetun
+# Logs:   docker-compose -f docker-compose.prod-vpn.yml logs -f
 # Stop:   docker-compose -f docker-compose.prod-vpn.yml down
 #
 # VPN STATUS:
-# Check VPN IP:         docker-compose -f docker-compose.prod-vpn.yml exec gluetun wget -qO- https://api.ipify.org
-# Check Forwarded Port: docker-compose -f docker-compose.prod-vpn.yml exec gluetun cat /tmp/gluetun/forwarded_port
-# Test Webhook:         curl https://<your-domain>.sslip.io/health
+# Check VPN IP:    docker-compose -f docker-compose.prod-vpn.yml exec gluetun wget -qO- https://api.ipify.org
+# Test Webhook:    curl https://<VPN-IP>.sslip.io:<FORWARDED-PORT>/health
 #
 # SECURITY NOTES:
-# - All bot API requests go through VPN (Telegram sees only VPN IP)
+# - ALL traffic (inbound + outbound) goes through VPN
+# - Telegram sees ONLY the VPN IP, never your real server IP
 # - Built-in kill switch: No traffic without VPN connection
-# - Incoming webhooks via Caddy reverse proxy (HTTPS)
+# - Caddy provides automatic HTTPS with Let's Encrypt
 # - Health checks ensure VPN is always connected
 #
 # ============================================================================
 
 services:
-  # VPN Container - All bot traffic routes through this
-  # Also acts as reverse proxy target for Caddy
+  # VPN Container - All traffic routes through this
   gluetun:
     image: qmcgaw/gluetun:latest
     container_name: shopbot-gluetun-prod-vpn
@@ -56,19 +57,8 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     ports:
-      # Bot internal port (for Caddy reverse proxy)
-      # Port 5100 to avoid conflict with non-VPN prod (5000) and staging (5001/5101)
-      - "5100:5100"
-      # Redis port (internal access)
-      # Port 6479 to avoid conflict with non-VPN prod (6379) and staging (6380/6480)
-      - "6479:6379"
-    labels:
-      # IMPORTANT: Replace with your actual domain or VPN IP with sslip.io
-      # Examples:
-      #   - bot.yourdomain.com
-      #   - <VPN-EXIT-IP>.sslip.io (get VPN IP with: docker exec gluetun wget -qO- https://api.ipify.org)
-      caddy: https://YOUR-DOMAIN-OR-VPN-IP.sslip.io
-      caddy.reverse_proxy: "{{upstreams 5100}}"
+      # IMPORTANT: Replace 17938 with YOUR AirVPN forwarded port from https://airvpn.org/ports/
+      - "17938:443"  # AirVPN forwarded port → Caddy HTTPS
     environment:
       # VPN Provider Configuration
       - VPN_SERVICE_PROVIDER=custom
@@ -79,16 +69,10 @@ services:
       - OPENVPN_USER=${AIRVPN_USERNAME}
       - OPENVPN_PASSWORD=${AIRVPN_PASSWORD}
 
-      # Port Forwarding
-      # Note: Gluetun's automatic port forwarding doesn't support AirVPN
-      # AirVPN assigns a static forwarded port in their client area
-      # Check your forwarded port at: https://airvpn.org/ports/
-      # Then expose that port in the ports section above
-
       # Firewall & Kill Switch
       # Allow Docker internal network communication
       - FIREWALL_OUTBOUND_SUBNETS=172.16.0.0/12,192.168.0.0/16,10.0.0.0/8
-      - FIREWALL_VPN_INPUT_PORTS=5100
+      - FIREWALL_VPN_INPUT_PORTS=443
 
       # Timezone
       - TZ=Europe/Berlin
@@ -103,18 +87,29 @@ services:
       - ./vpn/airvpn.conf:/gluetun/custom.conf:ro
       # Mount certificates (certificate-based authentication)
       - ./vpn/certs:/gluetun/certs:ro
-      # Store forwarded port info
-      - gluetun_data:/tmp/gluetun
     restart: always
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "https://api.ipify.org"]
+      test: ["CMD", "sh", "-c", "wget -qO- https://api.ipify.org > /dev/null 2>&1"]
       interval: 60s
       timeout: 10s
       retries: 3
       start_period: 30s
     networks:
-      - caddy
-      - shopbot_network
+      - shopbot_network_prod_vpn
+
+  # Caddy - Runs through VPN for complete anonymity
+  caddy:
+    image: caddy:2-alpine
+    container_name: shopbot-caddy-prod-vpn
+    network_mode: "service:gluetun"  # All traffic through VPN
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    restart: always
 
   # Bot Container - Runs through VPN network
   bot:
@@ -163,7 +158,5 @@ volumes:
     driver: local
 
 networks:
-  shopbot_network:
+  shopbot_network_prod_vpn:
     driver: bridge
-  caddy:
-    external: true

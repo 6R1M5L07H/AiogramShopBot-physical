@@ -1,0 +1,193 @@
+#!/bin/bash
+# Migration Script: Caddy through VPN Architecture
+# This script migrates an existing docker-compose.prod-vpn.yml to the new architecture
+# where Caddy runs through VPN for complete anonymity.
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+COMPOSE_FILE="$PROJECT_ROOT/docker-compose.prod-vpn.yml"
+BACKUP_FILE="$PROJECT_ROOT/docker-compose.prod-vpn.yml.backup-$(date +%Y%m%d-%H%M%S)"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+echo "=========================================="
+echo "Caddy through VPN Migration Script"
+echo "=========================================="
+echo ""
+
+# Check if file exists
+if [ ! -f "$COMPOSE_FILE" ]; then
+    echo -e "${RED}Error: $COMPOSE_FILE not found!${NC}"
+    echo "Please create it from the template first:"
+    echo "  cp docker-compose.prod-vpn.yml.template docker-compose.prod-vpn.yml"
+    exit 1
+fi
+
+# Backup existing file
+echo -e "${YELLOW}Creating backup...${NC}"
+cp "$COMPOSE_FILE" "$BACKUP_FILE"
+echo -e "${GREEN}✓ Backup created: $BACKUP_FILE${NC}"
+echo ""
+
+# Extract current values
+echo -e "${YELLOW}Extracting current configuration...${NC}"
+
+# Extract AirVPN forwarded port (from ports section)
+AIRVPN_PORT=$(grep -oP '^\s*-\s*"\K\d+(?=:(443|5100|17938)")' "$COMPOSE_FILE" | head -1)
+if [ -z "$AIRVPN_PORT" ]; then
+    AIRVPN_PORT="17938"
+    echo -e "${YELLOW}⚠ Could not detect AirVPN port, using default: $AIRVPN_PORT${NC}"
+else
+    echo -e "${GREEN}✓ Detected AirVPN forwarded port: $AIRVPN_PORT${NC}"
+fi
+
+# Extract VPN IP from Caddy labels (if exists)
+VPN_IP=$(grep -oP 'caddy:\s*https://\K[0-9.]+' "$COMPOSE_FILE" 2>/dev/null || echo "")
+if [ -z "$VPN_IP" ]; then
+    echo -e "${YELLOW}⚠ Could not detect VPN IP from config${NC}"
+    echo -e "${YELLOW}  You'll need to update Caddyfile manually${NC}"
+else
+    echo -e "${GREEN}✓ Detected VPN IP: $VPN_IP${NC}"
+fi
+
+echo ""
+
+# Apply migration
+echo -e "${YELLOW}Applying migration...${NC}"
+
+# Step 1: Change network name
+sed -i.tmp 's/shopbot_network:/shopbot_network_prod_vpn:/g' "$COMPOSE_FILE"
+sed -i.tmp 's/- shopbot_network$/- shopbot_network_prod_vpn/g' "$COMPOSE_FILE"
+echo -e "${GREEN}✓ Updated network name to shopbot_network_prod_vpn${NC}"
+
+# Step 2: Remove external caddy network
+sed -i.tmp '/caddy:/d' "$COMPOSE_FILE"
+sed -i.tmp '/external: true/d' "$COMPOSE_FILE"
+echo -e "${GREEN}✓ Removed external caddy network${NC}"
+
+# Step 3: Update gluetun ports (replace bot port with Caddy port)
+sed -i.tmp "s/- \"[0-9]*:5100\"/# Bot now accessed via Caddy (no direct port exposure)/g" "$COMPOSE_FILE"
+sed -i.tmp "s/- \"$AIRVPN_PORT:[0-9]*\"/- \"$AIRVPN_PORT:443\"  # AirVPN forwarded port → Caddy HTTPS/g" "$COMPOSE_FILE"
+echo -e "${GREEN}✓ Updated port mapping: $AIRVPN_PORT:443${NC}"
+
+# Step 4: Remove Caddy labels from gluetun
+sed -i.tmp '/labels:/,/caddy\.reverse_proxy:/d' "$COMPOSE_FILE"
+echo -e "${GREEN}✓ Removed Caddy labels from gluetun${NC}"
+
+# Step 5: Update FIREWALL_VPN_INPUT_PORTS
+sed -i.tmp 's/FIREWALL_VPN_INPUT_PORTS=.*/FIREWALL_VPN_INPUT_PORTS=443/g' "$COMPOSE_FILE"
+echo -e "${GREEN}✓ Updated firewall to allow port 443${NC}"
+
+# Step 6: Remove gluetun_data volume and add Caddy volumes
+sed -i.tmp '/gluetun_data:/d' "$COMPOSE_FILE"
+sed -i.tmp 's/redis_data:/redis_data:\n    driver: local\n  caddy_data:\n    driver: local\n  caddy_config:/g' "$COMPOSE_FILE"
+echo -e "${GREEN}✓ Added Caddy volumes${NC}"
+
+# Step 7: Add Caddy service (insert after gluetun, before bot)
+# This is complex, so we'll use a temporary file
+TEMP_FILE=$(mktemp)
+
+# Find line number where bot service starts
+BOT_LINE=$(grep -n "^  bot:" "$COMPOSE_FILE" | head -1 | cut -d: -f1)
+
+if [ -z "$BOT_LINE" ]; then
+    echo -e "${RED}Error: Could not find bot service in config${NC}"
+    exit 1
+fi
+
+# Insert Caddy service before bot
+head -n $((BOT_LINE - 1)) "$COMPOSE_FILE" > "$TEMP_FILE"
+
+cat >> "$TEMP_FILE" << 'EOF'
+  # Caddy - Runs through VPN for complete anonymity
+  caddy:
+    image: caddy:2-alpine
+    container_name: shopbot-caddy-prod-vpn
+    network_mode: "service:gluetun"  # All traffic through VPN
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    restart: always
+
+EOF
+
+tail -n +$BOT_LINE "$COMPOSE_FILE" >> "$TEMP_FILE"
+
+mv "$TEMP_FILE" "$COMPOSE_FILE"
+echo -e "${GREEN}✓ Added Caddy service${NC}"
+
+# Cleanup temporary sed files
+rm -f "$COMPOSE_FILE.tmp"
+
+echo ""
+echo -e "${GREEN}=========================================="
+echo "Migration completed successfully!"
+echo "==========================================${NC}"
+echo ""
+
+# Create/Update Caddyfile if VPN IP was detected
+if [ -n "$VPN_IP" ]; then
+    CADDYFILE="$PROJECT_ROOT/Caddyfile"
+
+    if [ ! -f "$CADDYFILE" ]; then
+        echo -e "${YELLOW}Creating Caddyfile...${NC}"
+        cat > "$CADDYFILE" << EOF
+# Caddyfile for AiogramShopBot with VPN
+# Auto-generated by migration script
+
+https://${VPN_IP}.sslip.io {
+    # Reverse proxy to bot running on localhost:5100
+    reverse_proxy localhost:5100
+
+    # Enable access logs
+    log {
+        output file /data/access.log
+    }
+
+    # TLS settings for Let's Encrypt
+    tls {
+        # TLS-ALPN-01 challenge for non-standard ports
+    }
+}
+EOF
+        echo -e "${GREEN}✓ Created Caddyfile with VPN IP: ${VPN_IP}.sslip.io${NC}"
+    else
+        echo -e "${YELLOW}⚠ Caddyfile already exists, skipping creation${NC}"
+        echo "  Please update it manually with: ${VPN_IP}.sslip.io:${AIRVPN_PORT}"
+    fi
+fi
+
+echo ""
+echo -e "${YELLOW}Next steps:${NC}"
+echo "1. Review the changes:"
+echo "   diff $BACKUP_FILE $COMPOSE_FILE"
+echo ""
+echo "2. Update Caddyfile with your VPN IP:"
+if [ -n "$VPN_IP" ]; then
+    echo "   https://${VPN_IP}.sslip.io"
+else
+    echo "   Get VPN IP: docker-compose -f docker-compose.prod-vpn.yml exec gluetun wget -qO- https://api.ipify.org"
+fi
+echo ""
+echo "3. Restart services:"
+echo "   docker-compose -f docker-compose.prod-vpn.yml down"
+echo "   docker-compose -f docker-compose.prod-vpn.yml up -d"
+echo ""
+echo "4. Test webhook:"
+if [ -n "$VPN_IP" ]; then
+    echo "   curl https://${VPN_IP}.sslip.io:${AIRVPN_PORT}/health"
+else
+    echo "   curl https://YOUR-VPN-IP.sslip.io:${AIRVPN_PORT}/health"
+fi
+echo ""
+echo -e "${GREEN}Migration completed!${NC}"

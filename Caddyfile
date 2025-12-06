@@ -1,0 +1,25 @@
+# Caddyfile for AiogramShopBot with VPN
+# This Caddyfile is used ONLY for VPN deployments (docker-compose.prod-vpn.yml)
+#
+# IMPORTANT: Replace with your actual VPN IP from:
+#   docker-compose -f docker-compose.prod-vpn.yml exec gluetun wget -qO- https://api.ipify.org
+#
+# Example: 37.46.196.22.sslip.io:17938
+
+# REPLACE THIS with your VPN IP + sslip.io domain
+https://YOUR-VPN-IP.sslip.io {
+    # Reverse proxy to bot running on localhost:5100
+    # (Bot uses network_mode: service:gluetun, so it's on same network stack)
+    reverse_proxy localhost:5100
+
+    # Enable access logs
+    log {
+        output file /data/access.log
+    }
+
+    # TLS settings for Let's Encrypt
+    tls {
+        # Use Let's Encrypt ACME
+        # For non-standard ports, Caddy will use TLS-ALPN-01 challenge
+    }
+}
