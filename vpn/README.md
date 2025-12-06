@@ -151,18 +151,6 @@ Development (VPN):      Bot: 5001, Redis: 6379
 - Staging VPN: `shopbot-gluetun-stg-vpn`, `shopbot-stg-vpn`, `shopbot-redis-stg-vpn`
 - Development VPN: `shopbot-gluetun-dev-vpn`, `shopbot-dev-vpn`, `shopbot-redis-dev-vpn`
 
-**Migration from old setup:**
-If you already have a configured `docker-compose.prod-vpn.yml` with old ports (5000/6379), run:
-```bash
-bash vpn/migrate-prod-vpn-ports.sh
-```
-
-This will automatically update:
-- Container names → add `-prod-vpn` suffix
-- Port 5000 → 5100
-- Port 6379 → 6479
-- WEBAPP_PORT in .env
-
 ## Port Forwarding
 
 AirVPN provides static port forwarding, but it must be configured manually (Gluetun's automatic port forwarding doesn't support custom providers).
