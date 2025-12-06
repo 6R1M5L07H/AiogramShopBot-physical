@@ -71,16 +71,19 @@ def initialize_webhook_config():
 
         return WEBHOOK_URL
 
-    # PROD mode: Get external IP
+    # PROD mode: Get external IP or use BOT_DOMAIN if configured
     else:
-        WEBHOOK_HOST = get_sslipio_external_url()
-        WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
-
-        # Auto-set BOT_DOMAIN from external IP if not configured
-        if not BOT_DOMAIN:
+        # If BOT_DOMAIN is configured, use it for webhook
+        if BOT_DOMAIN:
+            WEBHOOK_HOST = BOT_DOMAIN
+            logging.info(f"[Init] Using configured BOT_DOMAIN for webhook: {BOT_DOMAIN}")
+        else:
+            # Auto-detect external IP via sslip.io
+            WEBHOOK_HOST = get_sslipio_external_url()
             BOT_DOMAIN = WEBHOOK_HOST
             logging.info(f"[Init] BOT_DOMAIN auto-configured from external IP: {BOT_DOMAIN}")
 
+        WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
         return WEBHOOK_URL
 
 WEBAPP_HOST = os.environ.get("WEBAPP_HOST")
