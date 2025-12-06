@@ -61,6 +61,46 @@ async def start(message: types.Message, session: AsyncSession | Session):
     # Falls back to bot default if user language not supported (de/en)
     user_lang = message.from_user.language_code if message.from_user.language_code in ["de", "en"] else None
 
+    telegram_id = message.from_user.id
+
+    # Create user if not exists and get approval status
+    from enums.approval_status import ApprovalStatus
+    approval_status = await UserService.create_if_not_exist(UserDTO(
+        telegram_username=message.from_user.username,
+        telegram_id=telegram_id
+    ), session)
+
+    # Check if user is approved (or admin - admins bypass approval)
+    from utils.permission_utils import is_admin_user
+    is_admin = is_admin_user(telegram_id)
+
+    if not is_admin and approval_status != ApprovalStatus.APPROVED:
+        # User not approved - show appropriate message based on status
+        if approval_status == ApprovalStatus.PENDING:
+            message_text = Localizator.get_text(BotEntity.COMMON, "registration_pending", lang=user_lang).format(
+                support_link=SUPPORT_LINK if SUPPORT_LINK else "N/A"
+            )
+        elif approval_status == ApprovalStatus.CLOSED_REGISTRATION:
+            message_text = Localizator.get_text(BotEntity.COMMON, "registration_waitlist", lang=user_lang)
+        elif approval_status == ApprovalStatus.REJECTED:
+            # Get user to fetch rejection reason
+            from repositories.user import UserRepository
+            user = await UserRepository.get_by_tgid(telegram_id, session)
+            reason = user.rejection_reason if user and user.rejection_reason else "N/A"
+            message_text = Localizator.get_text(BotEntity.COMMON, "registration_rejected", lang=user_lang).format(
+                reason=reason,
+                support_link=SUPPORT_LINK if SUPPORT_LINK else "N/A"
+            )
+        else:
+            # Unknown status - generic access denied
+            message_text = Localizator.get_text(BotEntity.COMMON, "access_denied", lang=user_lang).format(
+                message="Status unknown"
+            )
+
+        await message.answer(message_text)
+        return
+
+    # User is approved or admin - show normal menu
     all_categories_button = types.KeyboardButton(text=Localizator.get_text(BotEntity.USER, "all_categories", lang=user_lang))
     my_profile_button = types.KeyboardButton(text=Localizator.get_text(BotEntity.USER, "my_profile", lang=user_lang))
     faq_button = types.KeyboardButton(text=Localizator.get_text(BotEntity.USER, "faq", lang=user_lang))
@@ -68,17 +108,13 @@ async def start(message: types.Message, session: AsyncSession | Session):
     gpg_button = types.KeyboardButton(text=Localizator.get_text(BotEntity.USER, "gpg_menu", lang=user_lang))
     admin_menu_button = types.KeyboardButton(text=Localizator.get_text(BotEntity.ADMIN, "menu", lang=user_lang))
     cart_button = types.KeyboardButton(text=Localizator.get_text(BotEntity.USER, "cart", lang=user_lang))
-    telegram_id = message.from_user.id
-    await UserService.create_if_not_exist(UserDTO(
-        telegram_username=message.from_user.username,
-        telegram_id=telegram_id
-    ), session)
+
     keyboard = [[all_categories_button, my_profile_button], [faq_button, help_button],
                 [cart_button, gpg_button]]
-    # Check admin status using centralized permission utils
-    from utils.permission_utils import is_admin_user
-    if is_admin_user(telegram_id):
+
+    if is_admin:
         keyboard.append([admin_menu_button])
+
     start_markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2, keyboard=keyboard)
     await message.answer(Localizator.get_text(BotEntity.COMMON, "start_message", lang=user_lang), reply_markup=start_markup)
 

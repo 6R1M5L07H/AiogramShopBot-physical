@@ -965,3 +965,33 @@ class NotificationService:
             await NotificationService.send_to_admins(document, None)
         else:
             await NotificationService.send_to_admins(message, None)
+
+    # === Registration Management Notifications ===
+
+    @staticmethod
+    async def notify_user_approved(user_dto: UserDTO):
+        """
+        Notify user that their registration was approved.
+
+        Args:
+            user_dto: User who was approved
+        """
+        message = Localizator.get_text(BotEntity.COMMON, "registration_approved")
+        await NotificationService.send_to_user(message, user_dto.telegram_id)
+
+    @staticmethod
+    async def notify_user_rejected(user_dto: UserDTO, reason: str):
+        """
+        Notify user that their registration was rejected with reason.
+
+        Args:
+            user_dto: User who was rejected
+            reason: Rejection reason to show user
+        """
+        from utils.html_escape import safe_html
+
+        message = Localizator.get_text(BotEntity.COMMON, "registration_rejected").format(
+            reason=safe_html(reason),
+            support_link=config.SUPPORT_LINK if config.SUPPORT_LINK else "N/A"
+        )
+        await NotificationService.send_to_user(message, user_dto.telegram_id)
