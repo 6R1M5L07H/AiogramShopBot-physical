@@ -42,15 +42,17 @@ services:
   # VPN Container - All bot traffic routes through this
   gluetun:
     image: qmcgaw/gluetun:latest
-    container_name: shopbot-gluetun-dev
+    container_name: shopbot-gluetun-dev-vpn
     cap_add:
       - NET_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
     ports:
       # Bot internal port (for webhook access)
+      # Port 5001 - dev environment, no conflict with prod (5000/5100) or staging (5001/5101)
       - "5001:5001"
       # Redis port (accessed through VPN network)
+      # Port 6379 - dev environment, no conflict with prod (6379/6479) or staging (6380/6480)
       - "6379:6379"
     environment:
       # VPN Provider Configuration
@@ -99,7 +101,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: shopbot-dev
+    container_name: shopbot-dev-vpn
     network_mode: "service:gluetun"  # All traffic through VPN
     env_file:
       - .env
@@ -119,7 +121,7 @@ services:
   # Redis Container - Accessible through VPN network
   redis:
     image: redis:7-alpine
-    container_name: shopbot-redis-dev
+    container_name: shopbot-redis-dev-vpn
     network_mode: "service:gluetun"  # Share VPN network
     command: redis-server --requirepass dev-redis-password-123
     depends_on:

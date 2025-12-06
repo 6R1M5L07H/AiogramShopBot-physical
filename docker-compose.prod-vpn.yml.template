@@ -50,23 +50,25 @@ services:
   # Also acts as reverse proxy target for Caddy
   gluetun:
     image: qmcgaw/gluetun:latest
-    container_name: shopbot-gluetun-prod
+    container_name: shopbot-gluetun-prod-vpn
     cap_add:
       - NET_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
     ports:
       # Bot internal port (for Caddy reverse proxy)
-      - "5000:5000"
+      # Port 5100 to avoid conflict with non-VPN prod (5000) and staging (5001/5101)
+      - "5100:5100"
       # Redis port (internal access)
-      - "6379:6379"
+      # Port 6479 to avoid conflict with non-VPN prod (6379) and staging (6380/6480)
+      - "6479:6379"
     labels:
       # IMPORTANT: Replace with your actual domain or VPN IP with sslip.io
       # Examples:
       #   - bot.yourdomain.com
       #   - <VPN-EXIT-IP>.sslip.io (get VPN IP with: docker exec gluetun wget -qO- https://api.ipify.org)
       caddy: https://YOUR-DOMAIN-OR-VPN-IP.sslip.io
-      caddy.reverse_proxy: "{{upstreams 5000}}"
+      caddy.reverse_proxy: "{{upstreams 5100}}"
     environment:
       # VPN Provider Configuration
       - VPN_SERVICE_PROVIDER=custom
@@ -84,7 +86,7 @@ services:
       # Firewall & Kill Switch
       # Allow Docker internal network communication
       - FIREWALL_OUTBOUND_SUBNETS=172.16.0.0/12,192.168.0.0/16,10.0.0.0/8
-      - FIREWALL_VPN_INPUT_PORTS=5000
+      - FIREWALL_VPN_INPUT_PORTS=5100
 
       # Timezone
       - TZ=Europe/Berlin
@@ -117,7 +119,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: shopbot-prod
+    container_name: shopbot-prod-vpn
     network_mode: "service:gluetun"  # All traffic through VPN
     env_file:
       - .env
@@ -137,7 +139,7 @@ services:
   # Redis Container - Accessible through VPN network
   redis:
     image: redis:7-alpine
-    container_name: shopbot-redis-prod
+    container_name: shopbot-redis-prod-vpn
     network_mode: "service:gluetun"  # Share VPN network
     command:
       - /bin/sh
