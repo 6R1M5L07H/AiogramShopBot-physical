@@ -126,6 +126,8 @@ After copying the appropriate template, fill in all empty values and customize a
 | REDIS_PASSWORD            | Required variable, needed to make the throttling mechanism work.                                                                                                                                                                                                                                                            | Any string you want                                                 |
 | REDIS_HOST                | Required variable, needed to make the throttling mechanism work.                                                                                                                                                                                                                                                            | "redis" for docker-compose.yml                                      |
 | BOT_DOMAIN                | Domain for Telegram Mini App (PGP encryption feature). HTTPS required. Supports auto-configuration: leave empty in development (auto-set from ngrok URL), set explicitly in production (your domain or external IP). See "BOT_DOMAIN Auto-Configuration" section below for details.                                          | Empty (dev) or "bot.yourdomain.com" (prod)                          |
+| WEBHOOK_MODE              | Determines how the bot receives updates from Telegram. "webhook" requires public HTTPS endpoint (ports 80/88/443/8443), "polling" requires no public endpoint. See "Webhook Mode and Polling Mode" section below for details.                                                                                               | "webhook" (default) or "polling"                                    |
+| POLLING_TIMEOUT           | Timeout in seconds for polling updates from Telegram (1-50). Only used when WEBHOOK_MODE=polling. Lower value = faster response but more API calls. See "Webhook Mode and Polling Mode" section below.                                                                                                                      | 10 (only relevant for polling mode)                                 |
 
 #### BOT_DOMAIN Auto-Configuration
 
@@ -149,6 +151,51 @@ The `BOT_DOMAIN` variable is used for the PGP-encrypted shipping address feature
   - Requires valid SSL certificate for the domain
 
 Auto-configuration ensures the Mini App works immediately without manual URL configuration, while still allowing explicit configuration for production environments with custom domains.
+
+#### Webhook Mode and Polling Mode
+
+The bot supports two modes for receiving Telegram updates, configurable via the `WEBHOOK_MODE` environment variable:
+
+**Webhook Mode (Default)**:
+- Telegram pushes updates to your bot via HTTPS webhook
+- Requires public HTTPS endpoint on ports: 80, 88, 443, or 8443
+- Faster response time (instant delivery)
+- Recommended for standard production deployments
+
+**Polling Mode**:
+- Bot polls Telegram API for updates via `getUpdates`
+- No public endpoint required
+- Slight delay in receiving updates (configurable, default ~1 second)
+- Useful for environments where exposing public ports is not feasible
+
+**Configuration:**
+
+Set `WEBHOOK_MODE` in your `.env` file:
+```bash
+# Webhook mode (default, requires public HTTPS)
+WEBHOOK_MODE=webhook
+
+# Polling mode (no public endpoint needed)
+WEBHOOK_MODE=polling
+
+# Polling timeout in seconds (only used when WEBHOOK_MODE=polling)
+# Lower value = faster response but more API calls. Default: 10
+POLLING_TIMEOUT=10
+```
+
+**When to Use Each Mode:**
+
+Use **Webhook Mode** when:
+- You have a public server with HTTPS
+- You can expose ports 80, 88, 443, or 8443
+- You want instant update delivery
+
+Use **Polling Mode** when:
+- You cannot expose public webhook ports
+- You don't have a public HTTPS endpoint
+- You prefer simpler network setup without reverse proxy
+
+Both modes support all bot features (background jobs, database operations, admin functions). The only difference is how updates are received from Telegram.
 
 ### 1.1 Starting AiogramShopBot with Docker-compose
 
