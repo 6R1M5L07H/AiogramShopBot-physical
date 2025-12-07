@@ -370,7 +370,7 @@
     "gpg_menu": "🔐 Encryption",
     "insufficient_funds": "⚠️ Insufficient funds!",
     "my_profile": "👤 My profile",
-    "my_profile_msg": "👤 <b>Your profile\nID:</b> <code>{telegram_id}</code>\n\n<b>Your balance in {currency_text}:</b>\n{fiat_balance}{currency_sym}",
+    "my_profile_msg": "👤 <b>Profile</b>\n\n<b>ID:</b> <code>{telegram_id}</code>\n\n<b>Balance:</b> {fiat_balance} {currency_sym}",
     "no_categories": "⚠️ No categories",
     "no_purchases": "⚠️ You haven't had any purchases yet",
     "out_of_stock": "⚠️<b>The following items are sold out or have insufficient stock:</b>\n\n",
