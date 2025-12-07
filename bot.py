@@ -242,14 +242,14 @@ def main() -> None:
         # Webhook mode: Start uvicorn server
         uvicorn.run(app, host=config.WEBAPP_HOST, port=config.WEBAPP_PORT)
     else:
-        # Polling mode: Start polling
+        # Polling mode: Start FastAPI + polling in parallel
         asyncio.run(main_polling())
 
 
 async def main_polling() -> None:
     """
-    Start bot in polling mode.
-    Runs startup tasks then starts polling for updates.
+    Start bot in polling mode with FastAPI server for webhooks/API.
+    Runs FastAPI (payment webhooks, mini-app) + polling in parallel.
     """
     global backup_task, data_retention_task
 
@@ -257,6 +257,19 @@ async def main_polling() -> None:
     await create_db_and_tables()
     await bot.delete_webhook(drop_pending_updates=True)
     logging.info(f"[Startup] Webhook deleted (polling mode)")
+
+    # Start FastAPI server in background thread (for payment webhooks + mini-app)
+    import threading
+    from hypercorn.asyncio import serve
+    from hypercorn.config import Config as HypercornConfig
+
+    hypercorn_config = HypercornConfig()
+    hypercorn_config.bind = [f"{config.WEBAPP_HOST}:{config.WEBAPP_PORT}"]
+    hypercorn_config.loglevel = "WARNING"  # Reduce noise
+
+    # Start Hypercorn server in background task
+    server_task = asyncio.create_task(serve(app, hypercorn_config))
+    logging.info(f"[Startup] FastAPI server started on {config.WEBAPP_HOST}:{config.WEBAPP_PORT} (webhooks + mini-app)")
 
     # Start payment timeout job
     await payment_timeout_job.start()
@@ -290,6 +303,14 @@ async def main_polling() -> None:
     finally:
         # Shutdown tasks
         logging.warning('Shutting down..')
+
+        # Stop FastAPI server
+        server_task.cancel()
+        try:
+            await server_task
+        except asyncio.CancelledError:
+            logging.info("[Shutdown] FastAPI server stopped")
+
         await payment_timeout_job.stop()
 
         if backup_task is not None:

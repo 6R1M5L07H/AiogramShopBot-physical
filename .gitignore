@@ -192,6 +192,7 @@ backups/*.db.gz
 backups/*.gpg
 backups/*.sha256
 !backups/.gitkeep
+*.backup
 
 # Private documentation
 SETUP*.md
