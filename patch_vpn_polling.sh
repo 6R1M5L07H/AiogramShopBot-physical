@@ -1,0 +1,315 @@
+#!/bin/bash
+# ============================================================================
+# VPN Polling Mode Patch Script
+# ============================================================================
+#
+# This script converts VPN docker-compose templates from webhook to polling mode
+# - Removes Caddy (not needed for polling)
+# - Removes port forwarding (not needed for polling)
+# - Updates documentation
+#
+# Usage: bash patch_vpn_polling.sh
+#
+# ============================================================================
+
+set -e
+
+echo "🔧 Patching VPN templates for polling mode..."
+
+# Patch docker-compose.prod-vpn.yml.template
+echo "📝 Patching docker-compose.prod-vpn.yml.template..."
+cat > docker-compose.prod-vpn.yml.template << 'EOF'
+# ============================================================================
+# Production Docker Compose Configuration with VPN (AirVPN) - Polling Mode
+# ============================================================================
+#
+# PRODUCTION DEPLOYMENT with:
+# - Gluetun VPN container (AirVPN)
+# - Bot running through VPN tunnel (anonymous Telegram API access)
+# - Polling mode (no webhook, no public ports needed)
+# - Production-optimized bot configuration
+# - Redis with authentication
+# - Automated restarts
+# - Volume persistence for data and backups
+#
+# ARCHITECTURE (FULL VPN ANONYMITY - POLLING MODE):
+# Bot → Gluetun → VPN → Telegram API (polls for updates)
+#
+# RESULT: Telegram sees ONLY the VPN IP (all outbound traffic through VPN)
+#
+# PREREQUISITES:
+# 1. Copy environment template: cp .env.prod-vpn.template .env
+# 2. Fill in all required values in .env (especially VPN credentials)
+# 3. Get AirVPN config files from https://airvpn.org/generator/
+#    - Login to AirVPN.org
+#    - Go to Config Generator: https://airvpn.org/generator/
+#    - Select: OpenVPN, port 443 UDP, enable "Separate keys/certs"
+#    - Choose any server (port forwarding NOT needed for polling mode)
+#    - Download config and extract to ./vpn/airvpn.conf
+# 4. Ensure WEBHOOK_MODE=polling in .env (default in template)
+#
+# USAGE:
+# Start:  docker-compose -f docker-compose.prod-vpn.yml up -d
+# Logs:   docker-compose -f docker-compose.prod-vpn.yml logs -f
+# Stop:   docker-compose -f docker-compose.prod-vpn.yml down
+#
+# VPN STATUS:
+# Check VPN IP:    docker-compose -f docker-compose.prod-vpn.yml exec gluetun wget -qO- https://api.ipify.org
+# Test Bot:        docker-compose -f docker-compose.prod-vpn.yml logs -f bot
+#                  (Should show: "[Startup] Starting polling with timeout=10s...")
+#
+# SECURITY NOTES:
+# - ALL traffic (outbound) goes through VPN
+# - Telegram sees ONLY the VPN IP, never your real server IP
+# - Built-in kill switch: No traffic without VPN connection
+# - No public ports exposed (polling mode)
+# - Health checks ensure VPN is always connected
+#
+# ============================================================================
+
+services:
+  # VPN Container - All traffic routes through this
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: shopbot-gluetun-prod-vpn
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    # No ports needed - polling mode doesn't require public endpoint
+
+    environment:
+      # VPN Provider Configuration
+      - VPN_SERVICE_PROVIDER=custom
+      - VPN_TYPE=openvpn
+
+      # OpenVPN Configuration (from .env)
+      - OPENVPN_CUSTOM_CONFIG=/gluetun/custom.conf
+      - OPENVPN_USER=\${AIRVPN_USERNAME}
+      - OPENVPN_PASSWORD=\${AIRVPN_PASSWORD}
+
+      # Firewall & Kill Switch
+      # Allow Docker internal network communication
+      - FIREWALL_OUTBOUND_SUBNETS=172.16.0.0/12,192.168.0.0/16,10.0.0.0/8
+
+      # Timezone
+      - TZ=Europe/Berlin
+
+      # Health check configuration
+      - HEALTH_VPN_DURATION_INITIAL=30s
+
+      # Logging
+      - LOG_LEVEL=info
+    volumes:
+      # Mount AirVPN config file
+      - ./vpn/airvpn.conf:/gluetun/custom.conf:ro
+      # Mount certificates (certificate-based authentication)
+      - ./vpn/certs:/gluetun/certs:ro
+    restart: always
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -qO- https://api.ipify.org > /dev/null 2>&1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - shopbot_network_prod_vpn
+
+  # Bot Container - Runs through VPN network (polling mode)
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shopbot-prod-vpn
+    network_mode: "service:gluetun"  # All traffic through VPN
+    env_file:
+      - .env
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    volumes:
+      # Database and data directory
+      - ./data:/bot/data
+      # Backup directory (bind mount for direct access via cron/rsync)
+      - ./backups:/bot/backups
+    command: ["python", "-u", "run.py"]
+    restart: always
+    # Note: healthcheck via HTTP not possible due to network_mode: service
+    # Health is implicitly checked via gluetun container health
+
+  # Redis Container - Accessible through VPN network
+  redis:
+    image: redis:7-alpine
+    container_name: shopbot-redis-prod-vpn
+    network_mode: "service:gluetun"  # Share VPN network
+    command:
+      - /bin/sh
+      - -c
+      - redis-server --requirepass "\${REDIS_PASSWORD:?REDIS_PASSWORD variable is not set}"
+    env_file:
+      - .env
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    volumes:
+      - redis_data:/data
+    restart: always
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  shopbot_network_prod_vpn:
+    driver: bridge
+EOF
+
+# Patch docker-compose.dev-vpn.yml.template
+echo "📝 Patching docker-compose.dev-vpn.yml.template..."
+cat > docker-compose.dev-vpn.yml.template << 'EOF'
+version: '3.8'
+
+# ============================================================================
+# Development Docker Compose Configuration with VPN (AirVPN) - Polling Mode
+# ============================================================================
+#
+# DEVELOPMENT DEPLOYMENT with:
+# - Gluetun VPN container (AirVPN)
+# - Bot running through VPN tunnel (anonymous Telegram API access)
+# - Polling mode (no webhook, no public ports needed)
+# - Redis for FSM and rate limiting
+# - Relaxed settings for development/testing
+#
+# PREREQUISITES:
+# 1. Copy environment template: cp .env.dev-vpn.template .env
+# 2. Fill in all required values in .env (especially VPN credentials)
+# 3. Get AirVPN config files from https://airvpn.org/generator/
+#    - Login to AirVPN.org
+#    - Go to Config Generator: https://airvpn.org/generator/
+#    - Select: OpenVPN, port 443 UDP, enable "Separate keys/certs"
+#    - Choose any server (port forwarding NOT needed for polling mode)
+#    - Download config and extract to ./vpn/airvpn.conf
+# 4. Ensure WEBHOOK_MODE=polling in .env (default in template)
+#
+# USAGE:
+# Start:  docker-compose -f docker-compose.dev-vpn.yml up -d
+# Logs:   docker-compose -f docker-compose.dev-vpn.yml logs -f bot
+# Stop:   docker-compose -f docker-compose.dev-vpn.yml down
+#
+# VPN STATUS:
+# Check VPN IP:  docker-compose -f docker-compose.dev-vpn.yml exec gluetun wget -qO- https://api.ipify.org
+# Test Bot:      docker-compose -f docker-compose.dev-vpn.yml logs -f bot
+#                (Should show: "[Startup] Starting polling with timeout=10s...")
+#
+# SECURITY NOTES:
+# - All bot API requests go through VPN (Telegram sees only VPN IP)
+# - Built-in kill switch: No traffic without VPN connection
+# - No public ports exposed (polling mode)
+# - Health checks ensure VPN is always connected
+#
+# ============================================================================
+
+services:
+  # VPN Container - All bot traffic routes through this
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: shopbot-gluetun-dev-vpn
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    # No ports needed - polling mode doesn't require public endpoint
+
+    environment:
+      # VPN Provider Configuration
+      - VPN_SERVICE_PROVIDER=custom
+      - VPN_TYPE=openvpn
+
+      # OpenVPN Configuration (from .env)
+      - OPENVPN_CUSTOM_CONFIG=/gluetun/custom.conf
+      - OPENVPN_USER=\${AIRVPN_USERNAME}
+      - OPENVPN_PASSWORD=\${AIRVPN_PASSWORD}
+
+      # Firewall & Kill Switch
+      # Allow Docker internal network communication
+      - FIREWALL_OUTBOUND_SUBNETS=172.16.0.0/12,192.168.0.0/16,10.0.0.0/8
+
+      # Timezone
+      - TZ=Europe/Berlin
+
+      # Health check configuration
+      - HEALTH_VPN_DURATION_INITIAL=30s
+
+      # Logging
+      - LOG_LEVEL=debug
+    volumes:
+      # Mount AirVPN config file
+      - ./vpn/airvpn.conf:/gluetun/custom.conf:ro
+      # Mount certificates (certificate-based authentication)
+      - ./vpn/certs:/gluetun/certs:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -qO- https://api.ipify.org > /dev/null 2>&1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - shopbot_network_dev_vpn
+
+  # Bot Container - Runs through VPN network (polling mode)
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shopbot-dev-vpn
+    network_mode: "service:gluetun"  # All traffic through VPN
+    env_file:
+      - .env
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    volumes:
+      # Database and data directory
+      - ./data:/bot/data
+      # Backup directory
+      - ./backups:/bot/backups
+      # Mount source code for development (hot reload)
+      - ./:/bot:cached
+    command: ["python", "-u", "run.py"]
+    restart: unless-stopped
+
+  # Redis Container
+  redis:
+    image: redis:7-alpine
+    container_name: shopbot-redis-dev-vpn
+    network_mode: "service:gluetun"  # Share VPN network
+    command:
+      - /bin/sh
+      - -c
+      - redis-server --requirepass "\${REDIS_PASSWORD:?REDIS_PASSWORD variable is not set}"
+    env_file:
+      - .env
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  shopbot_network_dev_vpn:
+    driver: bridge
+EOF
+
+echo "✅ VPN templates patched successfully!"
+echo ""
+echo "Next steps:"
+echo "1. Ensure WEBHOOK_MODE=polling in your .env file"
+echo "2. Restart services: docker-compose -f docker-compose.prod-vpn.yml down && docker-compose -f docker-compose.prod-vpn.yml up -d --build"
+echo "3. Check logs: docker-compose -f docker-compose.prod-vpn.yml logs -f bot"
+echo "4. Expected log: '[Startup] Starting polling with timeout=10s...'"

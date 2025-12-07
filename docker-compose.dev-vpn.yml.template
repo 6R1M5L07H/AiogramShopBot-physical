@@ -1,12 +1,13 @@
 version: '3.8'
 
 # ============================================================================
-# Development Docker Compose Configuration with VPN (AirVPN)
+# Development Docker Compose Configuration with VPN (AirVPN) - Polling Mode
 # ============================================================================
 #
 # DEVELOPMENT DEPLOYMENT with:
-# - Gluetun VPN container (AirVPN support with port forwarding)
+# - Gluetun VPN container (AirVPN)
 # - Bot running through VPN tunnel (anonymous Telegram API access)
+# - Polling mode (no webhook, no public ports needed)
 # - Redis for FSM and rate limiting
 # - Relaxed settings for development/testing
 #
@@ -17,23 +18,24 @@ version: '3.8'
 #    - Login to AirVPN.org
 #    - Go to Config Generator: https://airvpn.org/generator/
 #    - Select: OpenVPN, port 443 UDP, enable "Separate keys/certs"
-#    - Choose server with port forwarding support
+#    - Choose any server (port forwarding NOT needed for polling mode)
 #    - Download config and extract to ./vpn/airvpn.conf
+# 4. Ensure WEBHOOK_MODE=polling in .env (default in template)
 #
 # USAGE:
 # Start:  docker-compose -f docker-compose.dev-vpn.yml up -d
-# Logs:   docker-compose -f docker-compose.dev-vpn.yml logs -f gluetun
+# Logs:   docker-compose -f docker-compose.dev-vpn.yml logs -f bot
 # Stop:   docker-compose -f docker-compose.dev-vpn.yml down
 #
 # VPN STATUS:
-# Check VPN IP:         docker-compose -f docker-compose.dev-vpn.yml exec gluetun wget -qO- https://api.ipify.org
-# Check Forwarded Port: docker-compose -f docker-compose.dev-vpn.yml exec gluetun cat /tmp/gluetun/forwarded_port
-# Test Webhook:         curl https://<vpn-ip>.sslip.io:5001/health
+# Check VPN IP:  docker-compose -f docker-compose.dev-vpn.yml exec gluetun wget -qO- https://api.ipify.org
+# Test Bot:      docker-compose -f docker-compose.dev-vpn.yml logs -f bot
+#                (Should show: "[Startup] Starting polling with timeout=10s...")
 #
 # SECURITY NOTES:
 # - All bot API requests go through VPN (Telegram sees only VPN IP)
 # - Built-in kill switch: No traffic without VPN connection
-# - Port forwarding from AirVPN for webhook reception
+# - No public ports exposed (polling mode)
 # - Health checks ensure VPN is always connected
 #
 # ============================================================================

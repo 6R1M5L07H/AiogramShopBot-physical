@@ -1,21 +1,20 @@
 # ============================================================================
-# Production Docker Compose Configuration with VPN (AirVPN)
+# Production Docker Compose Configuration with VPN (AirVPN) - Polling Mode
 # ============================================================================
 #
 # PRODUCTION DEPLOYMENT with:
-# - Gluetun VPN container (AirVPN with port forwarding)
-# - Caddy reverse proxy running THROUGH VPN for complete anonymity
+# - Gluetun VPN container (AirVPN)
 # - Bot running through VPN tunnel (anonymous Telegram API access)
+# - Polling mode (no webhook, no public ports needed)
 # - Production-optimized bot configuration
 # - Redis with authentication
 # - Automated restarts
 # - Volume persistence for data and backups
 #
-# ARCHITECTURE (FULL VPN ANONYMITY):
-# Telegram → AirVPN Port Forward → Gluetun:FORWARDED_PORT → Caddy:443 → Bot:5100
-# Bot → Gluetun → VPN → Telegram API
+# ARCHITECTURE (FULL VPN ANONYMITY - POLLING MODE):
+# Bot → Gluetun → VPN → Telegram API (polls for updates)
 #
-# RESULT: Telegram sees ONLY the VPN IP (both inbound and outbound)
+# RESULT: Telegram sees ONLY the VPN IP (all outbound traffic through VPN)
 #
 # PREREQUISITES:
 # 1. Copy environment template: cp .env.prod-vpn.template .env
@@ -24,10 +23,9 @@
 #    - Login to AirVPN.org
 #    - Go to Config Generator: https://airvpn.org/generator/
 #    - Select: OpenVPN, port 443 UDP, enable "Separate keys/certs"
-#    - Choose server with port forwarding support
+#    - Choose any server (port forwarding NOT needed for polling mode)
 #    - Download config and extract to ./vpn/airvpn.conf
-# 4. Request port forwarding at https://airvpn.org/ports/
-# 5. Update AIRVPN_FORWARDED_PORT below with your assigned port (line 64)
+# 4. Ensure WEBHOOK_MODE=polling in .env (default in template)
 #
 # USAGE:
 # Start:  docker-compose -f docker-compose.prod-vpn.yml up -d
@@ -36,13 +34,14 @@
 #
 # VPN STATUS:
 # Check VPN IP:    docker-compose -f docker-compose.prod-vpn.yml exec gluetun wget -qO- https://api.ipify.org
-# Test Webhook:    curl https://<VPN-IP>.sslip.io:<FORWARDED-PORT>/health
+# Test Bot:        docker-compose -f docker-compose.prod-vpn.yml logs -f bot
+#                  (Should show: "[Startup] Starting polling with timeout=10s...")
 #
 # SECURITY NOTES:
-# - ALL traffic (inbound + outbound) goes through VPN
+# - ALL traffic (outbound) goes through VPN
 # - Telegram sees ONLY the VPN IP, never your real server IP
 # - Built-in kill switch: No traffic without VPN connection
-# - Caddy provides automatic HTTPS with Let's Encrypt
+# - No public ports exposed (polling mode)
 # - Health checks ensure VPN is always connected
 #
 # ============================================================================
@@ -56,9 +55,8 @@ services:
       - NET_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
-    ports:
-      # IMPORTANT: Replace 17938 with YOUR AirVPN forwarded port from https://airvpn.org/ports/
-      - "17938:443"  # AirVPN forwarded port → Caddy HTTPS
+    # No ports needed - polling mode doesn't require public endpoint
+
     environment:
       # VPN Provider Configuration
       - VPN_SERVICE_PROVIDER=custom
@@ -97,21 +95,7 @@ services:
     networks:
       - shopbot_network_prod_vpn
 
-  # Caddy - Runs through VPN for complete anonymity
-  caddy:
-    image: caddy:2-alpine
-    container_name: shopbot-caddy-prod-vpn
-    network_mode: "service:gluetun"  # All traffic through VPN
-    depends_on:
-      gluetun:
-        condition: service_healthy
-    volumes:
-      - caddy_data:/data
-      - caddy_config:/config
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-    restart: always
-
-  # Bot Container - Runs through VPN network
+  # Bot Container - Runs through VPN network (polling mode)
   bot:
     build:
       context: .
@@ -153,10 +137,6 @@ services:
 
 volumes:
   redis_data:
-    driver: local
-  caddy_data:
-    driver: local
-  caddy_config:
     driver: local
 
 networks:
