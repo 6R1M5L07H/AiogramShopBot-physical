@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 
 from enums.currency import Currency
 from enums.runtime_environment import RuntimeEnvironment
+from enums.webhook_mode import WebhookMode
 from external_ip import get_sslipio_external_url
 from ngrok_executor import start_ngrok
 
@@ -256,3 +257,20 @@ WEBHOOK_SECURITY_HEADERS_ENABLED = os.environ.get("WEBHOOK_SECURITY_HEADERS_ENAB
 WEBHOOK_CSP_ENABLED = os.environ.get("WEBHOOK_CSP_ENABLED", "false") == "true"  # Enable Content Security Policy
 WEBHOOK_HSTS_ENABLED = os.environ.get("WEBHOOK_HSTS_ENABLED", "false") == "true"  # Enable HSTS (only for HTTPS)
 WEBHOOK_CORS_ALLOWED_ORIGINS = os.environ.get("WEBHOOK_CORS_ALLOWED_ORIGINS", "").split(",") if os.environ.get("WEBHOOK_CORS_ALLOWED_ORIGINS") else []  # CORS allowed origins
+
+# Webhook Mode Configuration
+try:
+    _webhook_mode_str = os.environ.get("WEBHOOK_MODE", "webhook")
+    WEBHOOK_MODE = WebhookMode(_webhook_mode_str)
+except ValueError as e:
+    valid_modes = [mode.value for mode in WebhookMode]
+    import sys
+    print(f"\n ERROR: Invalid WEBHOOK_MODE configuration\n", file=sys.stderr)
+    print(f"Reason: {e}", file=sys.stderr)
+    print(f"Valid values: {', '.join(valid_modes)}", file=sys.stderr)
+    print(f"Current value: {os.environ.get('WEBHOOK_MODE', '(not set)')}", file=sys.stderr)
+    print(f"\nAdd to .env: WEBHOOK_MODE={valid_modes[0]}\n", file=sys.stderr)
+    sys.exit(1)
+
+# Polling timeout configuration (only used when WEBHOOK_MODE=polling)
+POLLING_TIMEOUT = int(os.environ.get("POLLING_TIMEOUT", "10"))  # Default: 10 seconds

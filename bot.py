@@ -11,11 +11,16 @@ import config
 from utils.config_validator import validate_or_exit
 validate_or_exit(config)
 
-# Initialize webhook configuration (must happen before app setup)
+# Initialize webhook configuration (only if webhook mode)
 # This performs side effects (ngrok start, HTTP request) that were previously
 # happening at module import time, which violated "import should be safe" principle
-config.initialize_webhook_config()
-logging.info(f"[Init] Webhook configuration initialized: {config.WEBHOOK_URL}")
+from enums.webhook_mode import WebhookMode
+
+if config.WEBHOOK_MODE == WebhookMode.WEBHOOK:
+    config.initialize_webhook_config()
+    logging.info(f"[Init] Webhook configuration initialized: {config.WEBHOOK_URL}")
+else:
+    logging.info(f"[Init] Bot running in POLLING mode (no webhook)")
 
 # Load shipping types configuration for selected country
 from utils.shipping_types_loader import load_shipping_types
@@ -79,11 +84,18 @@ async def lifespan(app: FastAPI):
 
     # Startup
     await create_db_and_tables()
-    await bot.set_webhook(
-        url=config.WEBHOOK_URL,
-        secret_token=config.WEBHOOK_SECRET_TOKEN
-    )
-    logging.info(f"[Startup] Webhook registered with Telegram")
+
+    # Only set webhook if in webhook mode
+    if config.WEBHOOK_MODE == WebhookMode.WEBHOOK:
+        await bot.set_webhook(
+            url=config.WEBHOOK_URL,
+            secret_token=config.WEBHOOK_SECRET_TOKEN
+        )
+        logging.info(f"[Startup] Webhook registered with Telegram")
+    else:
+        # Ensure webhook is deleted in polling mode
+        await bot.delete_webhook(drop_pending_updates=True)
+        logging.info(f"[Startup] Webhook deleted (polling mode)")
 
     # Start payment timeout job
     await payment_timeout_job.start()
@@ -223,4 +235,76 @@ async def exception_handler(request: Request, exc: Exception):
 
 
 def main() -> None:
-    uvicorn.run(app, host=config.WEBAPP_HOST, port=config.WEBAPP_PORT)
+    """
+    Start the bot in either webhook or polling mode based on configuration.
+    """
+    if config.WEBHOOK_MODE == WebhookMode.WEBHOOK:
+        # Webhook mode: Start uvicorn server
+        uvicorn.run(app, host=config.WEBAPP_HOST, port=config.WEBAPP_PORT)
+    else:
+        # Polling mode: Start polling
+        asyncio.run(main_polling())
+
+
+async def main_polling() -> None:
+    """
+    Start bot in polling mode.
+    Runs startup tasks then starts polling for updates.
+    """
+    global backup_task, data_retention_task
+
+    # Startup tasks
+    await create_db_and_tables()
+    await bot.delete_webhook(drop_pending_updates=True)
+    logging.info(f"[Startup] Webhook deleted (polling mode)")
+
+    # Start payment timeout job
+    await payment_timeout_job.start()
+
+    # Start database backup scheduler (if enabled)
+    if config.DB_BACKUP_ENABLED:
+        backup_task = asyncio.create_task(backup_scheduler())
+        logging.info("[Startup] Database backup scheduler started")
+    else:
+        logging.info("[Startup] Database backup scheduler disabled")
+
+    # Start data retention cleanup job
+    data_retention_task = asyncio.create_task(start_data_retention_cleanup_job())
+    logging.info("[Startup] Data retention cleanup job started")
+
+    # Notify admins on startup
+    for admin in config.ADMIN_ID_LIST:
+        try:
+            await bot.send_message(admin, 'Bot is working (polling mode)')
+        except Exception as e:
+            logging.warning(e)
+
+    # Start polling
+    logging.info(f"[Startup] Starting polling with timeout={config.POLLING_TIMEOUT}s...")
+    try:
+        await dp.start_polling(
+            bot,
+            polling_timeout=config.POLLING_TIMEOUT,
+            allowed_updates=dp.resolve_used_update_types()
+        )
+    finally:
+        # Shutdown tasks
+        logging.warning('Shutting down..')
+        await payment_timeout_job.stop()
+
+        if backup_task is not None:
+            backup_task.cancel()
+            try:
+                await backup_task
+            except asyncio.CancelledError:
+                logging.info("[Shutdown] Database backup scheduler stopped")
+
+        if data_retention_task is not None:
+            data_retention_task.cancel()
+            try:
+                await data_retention_task
+            except asyncio.CancelledError:
+                logging.info("[Shutdown] Data retention cleanup job stopped")
+
+        await dp.storage.close()
+        logging.warning('Bye!')
