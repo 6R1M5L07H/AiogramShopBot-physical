@@ -262,7 +262,7 @@ async def registration_mode_selection(**kwargs):
     callback = kwargs.get("callback")
     session = kwargs.get("session")
     msg, kb_builder = await AdminService.get_registration_mode_selection(session)
-    await callback.message.edit_text(text=msg, reply_markup=kb_builder.as_markup())
+    await callback.message.edit_text(text=msg, reply_markup=kb_builder.as_markup(), parse_mode="HTML")
 
 
 async def registration_mode_preview(**kwargs):
@@ -270,7 +270,7 @@ async def registration_mode_preview(**kwargs):
     callback = kwargs.get("callback")
     session = kwargs.get("session")
     msg, kb_builder = await AdminService.get_registration_mode_preview(callback)
-    await callback.message.edit_text(text=msg, reply_markup=kb_builder.as_markup())
+    await callback.message.edit_text(text=msg, reply_markup=kb_builder.as_markup(), parse_mode="HTML")
 
 
 async def registration_mode_execute(**kwargs):
@@ -278,7 +278,7 @@ async def registration_mode_execute(**kwargs):
     callback = kwargs.get("callback")
     session = kwargs.get("session")
     msg, kb_builder = await AdminService.set_registration_mode(callback, session)
-    await callback.message.edit_text(text=msg, reply_markup=kb_builder.as_markup())
+    await callback.message.edit_text(text=msg, reply_markup=kb_builder.as_markup(), parse_mode="HTML")
 
 
 @user_management.callback_query(AdminIdFilter(), UserManagementCallback.filter())

@@ -351,7 +351,10 @@
     "reject_user_preview_edit": "✏️ Edit",
     "reject_user_preview_send": "📤 Send",
     "reject_user_success": "❌ <b>User rejected.</b>",
-    "user_not_found": "⚠️ User not found."
+    "user_not_found": "⚠️ User not found.",
+    "cancel_button": "❌ Cancel",
+    "registration_pending": "⏳ <b>Registration Pending Approval</b>\n\nYour registration is being reviewed by our team. You will be notified once approved.\n\nFor questions, contact support: {support_link}",
+    "registration_waitlist": "🔒 <b>Registration Currently Closed</b>\n\nNew registrations are temporarily closed. Your account has been placed on the waitlist.\n\nYou will be notified when registration reopens or when you are approved."
   },
   "user": {
     "all_categories": "🗂️ All categories",

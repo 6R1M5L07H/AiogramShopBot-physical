@@ -344,7 +344,10 @@
     "reject_user_preview_edit": "✏️ Bearbeiten",
     "reject_user_preview_send": "📤 Senden",
     "reject_user_success": "❌ <b>Benutzer abgelehnt.</b>",
-    "user_not_found": "⚠️ Benutzer nicht gefunden."
+    "user_not_found": "⚠️ Benutzer nicht gefunden.",
+    "cancel_button": "❌ Abbrechen",
+    "registration_pending": "⏳ <b>Registrierung wartet auf Freischaltung</b>\n\nIhre Registrierung wird von unserem Team geprüft. Sie werden benachrichtigt, sobald Sie freigeschaltet wurden.\n\nBei Fragen wenden Sie sich an den Support: {support_link}",
+    "registration_waitlist": "🔒 <b>Registrierung derzeit geschlossen</b>\n\nNeue Registrierungen sind vorübergehend geschlossen. Ihr Konto wurde auf die Warteliste gesetzt.\n\nSie werden benachrichtigt, wenn die Registrierung wieder geöffnet wird oder Sie freigeschaltet werden."
   },
   "user": {
     "all_categories": "🗂️ Alle Kategorien",
