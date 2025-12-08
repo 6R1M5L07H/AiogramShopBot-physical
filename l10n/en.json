@@ -235,7 +235,18 @@
     "cancellation_strike_received": "⚠️ <b>Strike Received</b> - This cancellation resulted in a strike on your account.",
     "cancellation_full_refund": "💰 <b>Full Refund:</b> {refund_amount} {currency_symbol}",
     "shipping_address_admin_label": "<b>Shipping Address:</b>",
-    "order_wallet_credit": "💰 Wallet credited: {amount} {currency_sym}"
+    "order_wallet_credit": "💰 Wallet credited: {amount} {currency_sym}",
+    "registration_mode_toggle_button": "⚙️ Registration Mode",
+    "registration_mode_current": "👥 User Management (Mode: {mode})",
+    "registration_mode_selection_title": "⚙️ Select Registration Mode",
+    "registration_mode_open": "✅ Open",
+    "registration_mode_request_approval": "⏳ Approval",
+    "registration_mode_closed": "🔒 Closed",
+    "registration_mode_preview_open": "✅ <b>Open Mode</b>\n\nNew users are automatically approved and can use the shop immediately.",
+    "registration_mode_preview_request_approval": "⏳ <b>Approval Required</b>\n\nNew users must be manually approved. User receives message with support link for contact.\n\n<i>Requirement: SUPPORT_LINK must be set in .env.</i>",
+    "registration_mode_preview_closed": "🔒 <b>Closed</b>\n\nNo new registrations allowed. Users are placed on waitlist and can be activated later via batch approval.",
+    "registration_mode_confirm": "✅ Confirm",
+    "registration_mode_success": "✅ Registration mode set to <b>{mode}</b>."
   },
   "common": {
     "back_button": "⬅️ Back",
@@ -340,18 +351,7 @@
     "reject_user_preview_edit": "✏️ Edit",
     "reject_user_preview_send": "📤 Send",
     "reject_user_success": "❌ <b>User rejected.</b>",
-    "user_not_found": "⚠️ User not found.",
-    "registration_mode_toggle_button": "⚙️ Registration Mode",
-    "registration_mode_current": "👥 User Management (Mode: {mode})",
-    "registration_mode_selection_title": "⚙️ Select Registration Mode",
-    "registration_mode_open": "✅ Open",
-    "registration_mode_request_approval": "⏳ Approval",
-    "registration_mode_closed": "🔒 Closed",
-    "registration_mode_preview_open": "✅ <b>Open Mode</b>\n\nNew users are automatically approved and can use the shop immediately.",
-    "registration_mode_preview_request_approval": "⏳ <b>Approval Required</b>\n\nNew users must be manually approved. User receives message with support link for contact.\n\n<i>Requirement: SUPPORT_LINK must be set in .env.</i>",
-    "registration_mode_preview_closed": "🔒 <b>Closed</b>\n\nNo new registrations allowed. Users are placed on waitlist and can be activated later via batch approval.",
-    "registration_mode_confirm": "✅ Confirm",
-    "registration_mode_success": "✅ Registration mode set to <b>{mode}</b>."
+    "user_not_found": "⚠️ User not found."
   },
   "user": {
     "all_categories": "🗂️ All categories",

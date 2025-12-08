@@ -229,7 +229,18 @@
     "cancellation_strike_received": "⚠️ <b>Strike erhalten</b> - Diese Stornierung führte zu einem Strike auf dem Konto.",
     "cancellation_full_refund": "💰 <b>Volle Rückerstattung:</b> {refund_amount} {currency_symbol}",
     "shipping_address_admin_label": "<b>Adressdaten:</b>",
-    "order_wallet_credit": "💰 Guthaben gutgeschrieben: {amount} {currency_sym}"
+    "order_wallet_credit": "💰 Guthaben gutgeschrieben: {amount} {currency_sym}",
+    "registration_mode_toggle_button": "⚙️ Registrierungs-Modus",
+    "registration_mode_current": "👥 Benutzerverwaltung (Modus: {mode})",
+    "registration_mode_selection_title": "⚙️ Registrierungs-Modus wählen",
+    "registration_mode_open": "✅ Offen",
+    "registration_mode_request_approval": "⏳ Genehmigung",
+    "registration_mode_closed": "🔒 Geschlossen",
+    "registration_mode_preview_open": "✅ <b>Offener Modus</b>\n\nNeue Benutzer werden automatisch freigeschaltet und können sofort den Shop nutzen.",
+    "registration_mode_preview_request_approval": "⏳ <b>Genehmigung erforderlich</b>\n\nNeue Benutzer müssen manuell freigeschaltet werden. Benutzer erhält Nachricht mit Support-Link zur Kontaktaufnahme.\n\n<i>Voraussetzung: SUPPORT_LINK muss in .env gesetzt sein.</i>",
+    "registration_mode_preview_closed": "🔒 <b>Geschlossen</b>\n\nKeine neuen Registrierungen möglich. Benutzer werden auf Warteliste gesetzt und können später per Batch-Freischaltung aktiviert werden.",
+    "registration_mode_confirm": "✅ Bestätigen",
+    "registration_mode_success": "✅ Registrierungs-Modus auf <b>{mode}</b> gesetzt."
   },
   "common": {
     "back_button": "⬅️ Zurück",
@@ -333,18 +344,7 @@
     "reject_user_preview_edit": "✏️ Bearbeiten",
     "reject_user_preview_send": "📤 Senden",
     "reject_user_success": "❌ <b>Benutzer abgelehnt.</b>",
-    "user_not_found": "⚠️ Benutzer nicht gefunden.",
-    "registration_mode_toggle_button": "⚙️ Registrierungs-Modus",
-    "registration_mode_current": "👥 Benutzerverwaltung (Modus: {mode})",
-    "registration_mode_selection_title": "⚙️ Registrierungs-Modus wählen",
-    "registration_mode_open": "✅ Offen",
-    "registration_mode_request_approval": "⏳ Genehmigung",
-    "registration_mode_closed": "🔒 Geschlossen",
-    "registration_mode_preview_open": "✅ <b>Offener Modus</b>\n\nNeue Benutzer werden automatisch freigeschaltet und können sofort den Shop nutzen.",
-    "registration_mode_preview_request_approval": "⏳ <b>Genehmigung erforderlich</b>\n\nNeue Benutzer müssen manuell freigeschaltet werden. Benutzer erhält Nachricht mit Support-Link zur Kontaktaufnahme.\n\n<i>Voraussetzung: SUPPORT_LINK muss in .env gesetzt sein.</i>",
-    "registration_mode_preview_closed": "🔒 <b>Geschlossen</b>\n\nKeine neuen Registrierungen möglich. Benutzer werden auf Warteliste gesetzt und können später per Batch-Freischaltung aktiviert werden.",
-    "registration_mode_confirm": "✅ Bestätigen",
-    "registration_mode_success": "✅ Registrierungs-Modus auf <b>{mode}</b> gesetzt."
+    "user_not_found": "⚠️ Benutzer nicht gefunden."
   },
   "user": {
     "all_categories": "🗂️ Alle Kategorien",
