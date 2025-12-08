@@ -27,6 +27,7 @@ from models.user_strike import UserStrike
 from models.sales_record import SalesRecord
 from models.violation_statistics import ViolationStatistics
 from models.shipping_tier import ShippingTier
+from models.system_settings import SystemSettings
 
 __all__ = [
     'Base',
@@ -51,4 +52,5 @@ __all__ = [
     'SalesRecord',
     'ViolationStatistics',
     'ShippingTier',
+    'SystemSettings',
 ]
