@@ -237,95 +237,66 @@ async def exception_handler(request: Request, exc: Exception):
 def main() -> None:
     """
     Start the bot in either webhook or polling mode based on configuration.
+
+    In both modes:
+    - FastAPI app is initialized (for payment webhooks, mini-app, API endpoints)
+    - Background jobs are started (payment timeout, backups, data retention)
+
+    Difference:
+    - Webhook mode: Telegram sends updates to FastAPI webhook endpoint
+    - Polling mode: Bot polls Telegram API + FastAPI runs in background for webhooks/APIs
     """
     if config.WEBHOOK_MODE == WebhookMode.WEBHOOK:
-        # Webhook mode: Start uvicorn server
+        # Webhook mode: Start uvicorn server (handles both Telegram updates + payment webhooks)
         uvicorn.run(app, host=config.WEBAPP_HOST, port=config.WEBAPP_PORT)
     else:
-        # Polling mode: Start FastAPI + polling in parallel
+        # Polling mode: Start both uvicorn (for payment webhooks/APIs) and bot polling (for Telegram updates)
         asyncio.run(main_polling())
 
 
 async def main_polling() -> None:
     """
-    Start bot in polling mode with FastAPI server for webhooks/API.
-    Runs FastAPI (payment webhooks, mini-app) + polling in parallel.
+    Start bot in polling mode with parallel FastAPI server.
+
+    Architecture:
+    - Task 1: uvicorn server (payment webhooks, mini-app, API endpoints)
+    - Task 2: bot polling (Telegram update polling)
+
+    Both run concurrently to ensure payment callbacks and web features work.
+    Note: FastAPI lifespan events handle startup/shutdown tasks in this mode.
     """
-    global backup_task, data_retention_task
+    # Create uvicorn server config
+    uvicorn_config = uvicorn.Config(
+        app=app,
+        host=config.WEBAPP_HOST,
+        port=config.WEBAPP_PORT,
+        log_level="info"
+    )
+    server = uvicorn.Server(uvicorn_config)
 
-    # Startup tasks
-    await create_db_and_tables()
-    await bot.delete_webhook(drop_pending_updates=True)
-    logging.info(f"[Startup] Webhook deleted (polling mode)")
+    # Create tasks for concurrent execution
+    async def run_server():
+        """Run uvicorn server (triggers FastAPI lifespan events)"""
+        await server.serve()
 
-    # Start FastAPI server in background thread (for payment webhooks + mini-app)
-    import threading
-    from hypercorn.asyncio import serve
-    from hypercorn.config import Config as HypercornConfig
-
-    hypercorn_config = HypercornConfig()
-    hypercorn_config.bind = [f"{config.WEBAPP_HOST}:{config.WEBAPP_PORT}"]
-    hypercorn_config.loglevel = "WARNING"  # Reduce noise
-
-    # Start Hypercorn server in background task
-    server_task = asyncio.create_task(serve(app, hypercorn_config))
-    logging.info(f"[Startup] FastAPI server started on {config.WEBAPP_HOST}:{config.WEBAPP_PORT} (webhooks + mini-app)")
-
-    # Start payment timeout job
-    await payment_timeout_job.start()
-
-    # Start database backup scheduler (if enabled)
-    if config.DB_BACKUP_ENABLED:
-        backup_task = asyncio.create_task(backup_scheduler())
-        logging.info("[Startup] Database backup scheduler started")
-    else:
-        logging.info("[Startup] Database backup scheduler disabled")
-
-    # Start data retention cleanup job
-    data_retention_task = asyncio.create_task(start_data_retention_cleanup_job())
-    logging.info("[Startup] Data retention cleanup job started")
-
-    # Notify admins on startup
-    for admin in config.ADMIN_ID_LIST:
-        try:
-            await bot.send_message(admin, 'Bot is working (polling mode)')
-        except Exception as e:
-            logging.warning(e)
-
-    # Start polling
-    logging.info(f"[Startup] Starting polling with timeout={config.POLLING_TIMEOUT}s...")
-    try:
+    async def run_polling():
+        """Run bot polling"""
+        logging.info(f"[Startup] Starting polling with timeout={config.POLLING_TIMEOUT}s...")
         await dp.start_polling(
             bot,
             polling_timeout=config.POLLING_TIMEOUT,
             allowed_updates=dp.resolve_used_update_types()
         )
+
+    # Run both tasks concurrently
+    try:
+        await asyncio.gather(
+            run_server(),
+            run_polling()
+        )
+    except asyncio.CancelledError:
+        logging.warning('Shutting down polling and FastAPI server...')
     finally:
-        # Shutdown tasks
-        logging.warning('Shutting down..')
-
-        # Stop FastAPI server
-        server_task.cancel()
-        try:
-            await server_task
-        except asyncio.CancelledError:
-            logging.info("[Shutdown] FastAPI server stopped")
-
-        await payment_timeout_job.stop()
-
-        if backup_task is not None:
-            backup_task.cancel()
-            try:
-                await backup_task
-            except asyncio.CancelledError:
-                logging.info("[Shutdown] Database backup scheduler stopped")
-
-        if data_retention_task is not None:
-            data_retention_task.cancel()
-            try:
-                await data_retention_task
-            except asyncio.CancelledError:
-                logging.info("[Shutdown] Data retention cleanup job stopped")
-
-        await dp.storage.close()
+        # Graceful shutdown
+        await server.shutdown()
         logging.warning('Bye!')
