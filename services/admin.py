@@ -196,8 +196,33 @@ class AdminService:
                 return Localizator.get_text(BotEntity.ADMIN, "add_items_txt_msg"), kb_markup
 
     @staticmethod
-    async def get_user_management_menu() -> tuple[str, InlineKeyboardBuilder]:
+    async def get_user_management_menu(session: AsyncSession | Session) -> tuple[str, InlineKeyboardBuilder]:
+        """User Management main menu with current registration mode in title"""
+        from repositories.system_settings import SystemSettingsRepository
+        from enums.registration_mode import RegistrationMode
+
+        # Load current registration mode
+        current_mode = await SystemSettingsRepository.get_registration_mode(session)
+
+        # Map mode to display string
+        mode_display = {
+            RegistrationMode.OPEN: Localizator.get_text(BotEntity.ADMIN, "registration_mode_open"),
+            RegistrationMode.REQUEST_APPROVAL: Localizator.get_text(BotEntity.ADMIN, "registration_mode_request_approval"),
+            RegistrationMode.CLOSED: Localizator.get_text(BotEntity.ADMIN, "registration_mode_closed")
+        }
+
         kb_builder = InlineKeyboardBuilder()
+
+        # NEW: Registration Mode Toggle Button (first button)
+        kb_builder.button(
+            text=Localizator.get_text(BotEntity.ADMIN, "registration_mode_toggle_button"),
+            callback_data=UserManagementCallback.create(
+                level=13,
+                operation=UserManagementOperation.TOGGLE_REGISTRATION_MODE
+            )
+        )
+
+        # Existing buttons
         kb_builder.button(text=Localizator.get_text(BotEntity.ADMIN, "credit_management"),
                           callback_data=UserManagementCallback.create(1))
         kb_builder.button(text=Localizator.get_text(BotEntity.ADMIN, "make_refund"),
@@ -206,7 +231,13 @@ class AdminService:
                           callback_data=UserManagementCallback.create(1, UserManagementOperation.UNBAN_USER))
         kb_builder.adjust(1)
         kb_builder.row(AdminConstants.back_to_main_button)
-        return Localizator.get_text(BotEntity.ADMIN, "user_management"), kb_builder
+
+        # Title with current mode
+        title = Localizator.get_text(BotEntity.ADMIN, "registration_mode_current").format(
+            mode=mode_display[current_mode]
+        )
+
+        return title, kb_builder
 
     @staticmethod
     async def get_credit_management_menu(callback: CallbackQuery) -> tuple[str, InlineKeyboardBuilder]:
@@ -1128,6 +1159,128 @@ class AdminService:
                 page=unpacked_cb.page,
                 filter_type=unpacked_cb.filter_type
             ).pack()
+        ))
+
+        return message, kb_builder
+
+    # === Registration Mode Toggle Methods ===
+
+    @staticmethod
+    async def get_registration_mode_selection(session: AsyncSession | Session) -> tuple[str, InlineKeyboardBuilder]:
+        """
+        Show all registration modes with current mode highlighted (bold + underline).
+        Level 13: Mode Selection
+        """
+        from repositories.system_settings import SystemSettingsRepository
+        from enums.registration_mode import RegistrationMode
+
+        current_mode = await SystemSettingsRepository.get_registration_mode(session)
+
+        kb_builder = InlineKeyboardBuilder()
+
+        # Iterate over enum and create buttons
+        for mode in RegistrationMode:
+            # Get localized mode name
+            mode_key = f"registration_mode_{mode.value}"
+            text = Localizator.get_text(BotEntity.ADMIN, mode_key)
+
+            # Highlight active mode with bold + underline
+            if mode == current_mode:
+                text = f"<b><u>{text}</u></b>"
+
+            kb_builder.button(
+                text=text,
+                callback_data=UserManagementCallback.create(
+                    level=14,
+                    operation=UserManagementOperation.SET_REGISTRATION_MODE,
+                    mode=mode.value
+                )
+            )
+
+        kb_builder.adjust(1)
+        kb_builder.row(InlineKeyboardButton(
+            text=Localizator.get_text(BotEntity.COMMON, "back_button"),
+            callback_data=UserManagementCallback.create(level=0).pack()
+        ))
+
+        message = Localizator.get_text(BotEntity.ADMIN, "registration_mode_selection_title")
+        return message, kb_builder
+
+    @staticmethod
+    async def get_registration_mode_preview(callback: CallbackQuery) -> tuple[str, InlineKeyboardBuilder]:
+        """
+        Show detailed preview of selected mode with example user message.
+        Level 14: Mode Preview + Confirmation
+        """
+        from enums.registration_mode import RegistrationMode
+
+        unpacked = UserManagementCallback.unpack(callback.data)
+        selected_mode = RegistrationMode(unpacked.mode)
+
+        # Get detailed description
+        preview_key = f"registration_mode_preview_{selected_mode.value}"
+        description = Localizator.get_text(BotEntity.ADMIN, preview_key)
+
+        # Build example user message
+        if selected_mode == RegistrationMode.OPEN:
+            example_msg = "ℹ️ <i>(Keine spezielle Nachricht - User sieht Shop direkt)</i>"
+        elif selected_mode == RegistrationMode.REQUEST_APPROVAL:
+            example_msg = Localizator.get_text(BotEntity.COMMON, "registration_pending").format(
+                support_link=config.SUPPORT_LINK if config.SUPPORT_LINK else "N/A"
+            )
+        elif selected_mode == RegistrationMode.CLOSED:
+            example_msg = Localizator.get_text(BotEntity.COMMON, "registration_waitlist")
+        else:
+            example_msg = "N/A"
+
+        message = description + "\n\n📱 <b>Beispiel - User sieht:</b>\n" + example_msg
+
+        kb_builder = InlineKeyboardBuilder()
+        kb_builder.button(
+            text=Localizator.get_text(BotEntity.ADMIN, "registration_mode_confirm"),
+            callback_data=UserManagementCallback.create(
+                level=15,
+                operation=UserManagementOperation.EXECUTE_SET_MODE,
+                mode=unpacked.mode
+            )
+        )
+        kb_builder.button(
+            text=Localizator.get_text(BotEntity.COMMON, "cancel_button"),
+            callback_data=UserManagementCallback.create(level=13, operation=UserManagementOperation.TOGGLE_REGISTRATION_MODE)
+        )
+        kb_builder.adjust(1)
+
+        return message, kb_builder
+
+    @staticmethod
+    async def set_registration_mode(callback: CallbackQuery, session: AsyncSession | Session) -> tuple[str, InlineKeyboardBuilder]:
+        """
+        Execute mode change and show success message.
+        Level 15: Execute Set Mode
+        """
+        from repositories.system_settings import SystemSettingsRepository
+        from enums.registration_mode import RegistrationMode
+        from db import session_commit
+
+        unpacked = UserManagementCallback.unpack(callback.data)
+        new_mode = RegistrationMode(unpacked.mode)
+
+        # Write to database
+        await SystemSettingsRepository.set("registration_mode", new_mode.value, session)
+        await session_commit(session)
+
+        # Get display name for success message
+        mode_key = f"registration_mode_{new_mode.value}"
+        mode_display = Localizator.get_text(BotEntity.ADMIN, mode_key)
+
+        message = Localizator.get_text(BotEntity.ADMIN, "registration_mode_success").format(
+            mode=mode_display
+        )
+
+        kb_builder = InlineKeyboardBuilder()
+        kb_builder.row(InlineKeyboardButton(
+            text=Localizator.get_text(BotEntity.COMMON, "back_button"),
+            callback_data=UserManagementCallback.create(level=0).pack()
         ))
 
         return message, kb_builder
