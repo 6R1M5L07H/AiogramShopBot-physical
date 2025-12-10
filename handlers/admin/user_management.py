@@ -18,8 +18,9 @@ user_management = Router()
 async def user_management_menu(**kwargs):
     callback = kwargs.get("callback")
     state = kwargs.get("state")
+    session = kwargs.get("session")
     await state.clear()
-    msg, kb_builder = await AdminService.get_user_management_menu()
+    msg, kb_builder = await AdminService.get_user_management_menu(session)
     await callback.message.edit_text(text=msg, reply_markup=kb_builder.as_markup())
 
 
@@ -256,6 +257,30 @@ async def level_4_router(**kwargs):
             await callback.message.edit_text(text=msg, reply_markup=kb_builder.as_markup())
 
 
+async def registration_mode_selection(**kwargs):
+    """Level 13: Show registration mode selection menu."""
+    callback = kwargs.get("callback")
+    session = kwargs.get("session")
+    msg, kb_builder = await AdminService.get_registration_mode_selection(session)
+    await callback.message.edit_text(text=msg, reply_markup=kb_builder.as_markup(), parse_mode="HTML")
+
+
+async def registration_mode_preview(**kwargs):
+    """Level 14: Show preview of selected registration mode."""
+    callback = kwargs.get("callback")
+    session = kwargs.get("session")
+    msg, kb_builder = await AdminService.get_registration_mode_preview(callback)
+    await callback.message.edit_text(text=msg, reply_markup=kb_builder.as_markup(), parse_mode="HTML")
+
+
+async def registration_mode_execute(**kwargs):
+    """Level 15: Execute registration mode change."""
+    callback = kwargs.get("callback")
+    session = kwargs.get("session")
+    msg, kb_builder = await AdminService.set_registration_mode(callback, session)
+    await callback.message.edit_text(text=msg, reply_markup=kb_builder.as_markup(), parse_mode="HTML")
+
+
 @user_management.callback_query(AdminIdFilter(), UserManagementCallback.filter())
 async def inventory_management_navigation(callback: CallbackQuery, state: FSMContext,
                                           callback_data: UserManagementCallback, session: Session | AsyncSession):
@@ -266,7 +291,10 @@ async def inventory_management_navigation(callback: CallbackQuery, state: FSMCon
         1: credit_management,
         2: level_2_router,  # Routes based on operation: UNBAN_USER → banned list, else → refund buy
         3: level_3_router,  # Routes based on operation: UNBAN_USER → detail, else → refund_confirmation
-        4: level_4_router   # Routes based on operation: UNBAN_USER → confirmation/execute
+        4: level_4_router,  # Routes based on operation: UNBAN_USER → confirmation/execute
+        13: registration_mode_selection,  # Show registration mode selection menu
+        14: registration_mode_preview,    # Show preview of selected registration mode
+        15: registration_mode_execute     # Execute registration mode change
     }
     current_level_function = levels[current_level]
 

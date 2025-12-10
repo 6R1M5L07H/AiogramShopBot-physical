@@ -196,8 +196,33 @@ class AdminService:
                 return Localizator.get_text(BotEntity.ADMIN, "add_items_txt_msg"), kb_markup
 
     @staticmethod
-    async def get_user_management_menu() -> tuple[str, InlineKeyboardBuilder]:
+    async def get_user_management_menu(session: AsyncSession | Session) -> tuple[str, InlineKeyboardBuilder]:
+        """User Management main menu with current registration mode in title"""
+        from repositories.system_settings import SystemSettingsRepository
+        from enums.registration_mode import RegistrationMode
+
+        # Load current registration mode
+        current_mode = await SystemSettingsRepository.get_registration_mode(session)
+
+        # Map mode to display string
+        mode_display = {
+            RegistrationMode.OPEN: Localizator.get_text(BotEntity.ADMIN, "registration_mode_open"),
+            RegistrationMode.REQUEST_APPROVAL: Localizator.get_text(BotEntity.ADMIN, "registration_mode_request_approval"),
+            RegistrationMode.CLOSED: Localizator.get_text(BotEntity.ADMIN, "registration_mode_closed")
+        }
+
         kb_builder = InlineKeyboardBuilder()
+
+        # NEW: Registration Mode Toggle Button (first button)
+        kb_builder.button(
+            text=Localizator.get_text(BotEntity.ADMIN, "registration_mode_toggle_button"),
+            callback_data=UserManagementCallback.create(
+                level=13,
+                operation=UserManagementOperation.TOGGLE_REGISTRATION_MODE
+            )
+        )
+
+        # Existing buttons
         kb_builder.button(text=Localizator.get_text(BotEntity.ADMIN, "credit_management"),
                           callback_data=UserManagementCallback.create(1))
         kb_builder.button(text=Localizator.get_text(BotEntity.ADMIN, "make_refund"),
@@ -206,7 +231,13 @@ class AdminService:
                           callback_data=UserManagementCallback.create(1, UserManagementOperation.UNBAN_USER))
         kb_builder.adjust(1)
         kb_builder.row(AdminConstants.back_to_main_button)
-        return Localizator.get_text(BotEntity.ADMIN, "user_management"), kb_builder
+
+        # Title with current mode
+        title = Localizator.get_text(BotEntity.ADMIN, "registration_mode_current").format(
+            mode=mode_display[current_mode]
+        )
+
+        return title, kb_builder
 
     @staticmethod
     async def get_credit_management_menu(callback: CallbackQuery) -> tuple[str, InlineKeyboardBuilder]:
@@ -952,3 +983,304 @@ class AdminService:
         kb_builder.row(AdminConstants.back_to_main_button)
 
         return msg, kb_builder
+
+    # === Registration Management Methods ===
+
+    @staticmethod
+    async def get_user_list_view(
+            callback: CallbackQuery,
+            session: AsyncSession | Session
+    ) -> tuple[str, InlineKeyboardBuilder]:
+        """
+        Show paginated user list filtered by approval status.
+
+        Shows user list with filters: Pending, Waitlist, Banned.
+        Each user entry shows: username/ID, registration date, status.
+        """
+        from repositories.user import UserRepository
+        from enums.approval_status import ApprovalStatus
+        from utils.html_escape import safe_html
+
+        unpacked_cb = UserManagementCallback.unpack(callback.data)
+
+        # Map filter_type to ApprovalStatus
+        if unpacked_cb.filter_type == ApprovalStatus.PENDING.value:
+            status_filter = ApprovalStatus.PENDING
+            title_key = "user_list_title_pending"
+        elif unpacked_cb.filter_type == ApprovalStatus.CLOSED_REGISTRATION.value:
+            status_filter = ApprovalStatus.CLOSED_REGISTRATION
+            title_key = "user_list_title_waitlist"
+        else:  # Banned users (is_blocked=True, not approval_status)
+            # Special case: Banned users use existing method
+            return await AdminService.get_banned_users_list(callback, session)
+
+        # Get paginated users
+        users, total_count = await UserRepository.get_by_approval_status(
+            status_filter,
+            unpacked_cb.page,
+            session
+        )
+
+        kb_builder = InlineKeyboardBuilder()
+
+        if not users:
+            message = Localizator.get_text(BotEntity.ADMIN, "user_list_empty")
+        else:
+            message = Localizator.get_text(BotEntity.ADMIN, title_key).format(count=total_count)
+            message += "\n\n"
+
+            # Build user list buttons
+            for user in users:
+                username_display = safe_html(user.telegram_username) if user.telegram_username else f"ID: {user.telegram_id}"
+                date_str = user.registered_at.strftime("%d.%m.%Y") if user.registered_at else "N/A"
+
+                button_text = f"{date_str} - {username_display}"
+
+                kb_builder.button(
+                    text=button_text,
+                    callback_data=UserManagementCallback.create(
+                        level=6,  # User detail view
+                        operation=UserManagementOperation.USER_DETAIL,
+                        user_id=user.id,
+                        filter_type=unpacked_cb.filter_type
+                    ).pack()
+                )
+
+            kb_builder.adjust(1)
+
+            # Add batch approve button for pending/waitlist
+            if status_filter in [ApprovalStatus.PENDING, ApprovalStatus.CLOSED_REGISTRATION]:
+                kb_builder.row(InlineKeyboardButton(
+                    text=Localizator.get_text(BotEntity.ADMIN, "batch_approve_all"),
+                    callback_data=UserManagementCallback.create(
+                        level=7,  # Batch approve confirmation
+                        operation=UserManagementOperation.BATCH_APPROVE,
+                        filter_type=unpacked_cb.filter_type
+                    ).pack()
+                ))
+
+            # Pagination
+            max_page = await UserRepository.get_max_page_by_approval_status(status_filter, session)
+            kb_builder = await add_pagination_buttons(
+                kb_builder,
+                unpacked_cb,
+                max_page,
+                unpacked_cb.get_back_button(0)  # Back to user management menu
+            )
+
+        return message, kb_builder
+
+    @staticmethod
+    async def get_user_detail_view(
+            callback: CallbackQuery,
+            session: AsyncSession | Session
+    ) -> tuple[str, InlineKeyboardBuilder]:
+        """
+        Show detailed user information with approve/reject actions.
+
+        Shows:
+        - Username/ID, Telegram ID
+        - Registration date, status
+        - Lifetime revenue, orders (DUMMY for now)
+        - Contact button
+        - Approve/Reject buttons
+        """
+        from repositories.user import UserRepository
+        from enums.approval_status import ApprovalStatus
+        from utils.html_escape import safe_html
+
+        unpacked_cb = UserManagementCallback.unpack(callback.data)
+        user = await UserRepository.get_by_id(unpacked_cb.user_id, session)
+
+        if not user:
+            return Localizator.get_text(BotEntity.ADMIN, "user_not_found"), InlineKeyboardBuilder()
+
+        kb_builder = InlineKeyboardBuilder()
+
+        # Build message
+        username_display = safe_html(user.telegram_username) if user.telegram_username else "N/A"
+        status_key = f"approval_status_{user.approval_status.value}"
+
+        message = Localizator.get_text(BotEntity.ADMIN, "user_detail_header")
+        message += "\n\n"
+        message += Localizator.get_text(BotEntity.ADMIN, "user_detail_username").format(username=username_display)
+        message += Localizator.get_text(BotEntity.ADMIN, "user_detail_telegram_id").format(telegram_id=user.telegram_id)
+        message += Localizator.get_text(BotEntity.ADMIN, "user_detail_status").format(
+            status=Localizator.get_text(BotEntity.ADMIN, status_key)
+        )
+
+        if user.registered_at:
+            date_str = user.registered_at.strftime("%d.%m.%Y %H:%M")
+            message += Localizator.get_text(BotEntity.ADMIN, "user_detail_registered").format(date=date_str)
+
+        # DUMMY statistics
+        message += "\n"
+        message += Localizator.get_text(BotEntity.ADMIN, "user_detail_stats_header")
+        message += Localizator.get_text(BotEntity.ADMIN, "user_detail_lifetime_revenue").format(
+            revenue=f"{user.lifetime_revenue:.2f}",
+            currency=Localizator.get_currency_symbol()
+        )
+        message += Localizator.get_text(BotEntity.ADMIN, "user_detail_lifetime_orders").format(orders=user.lifetime_orders)
+
+        # Contact button (using telegram_id)
+        kb_builder.row(InlineKeyboardButton(
+            text=Localizator.get_text(BotEntity.ADMIN, "contact_user"),
+            url=f"tg://user?id={user.telegram_id}"
+        ))
+
+        # Action buttons based on status
+        if user.approval_status == ApprovalStatus.PENDING or user.approval_status == ApprovalStatus.CLOSED_REGISTRATION:
+            kb_builder.button(
+                text=Localizator.get_text(BotEntity.ADMIN, "approve_user_button"),
+                callback_data=UserManagementCallback.create(
+                    level=8,  # Approve confirmation
+                    operation=UserManagementOperation.APPROVE_USER,
+                    user_id=user.id,
+                    filter_type=unpacked_cb.filter_type
+                ).pack()
+            )
+            kb_builder.button(
+                text=Localizator.get_text(BotEntity.ADMIN, "reject_user_button"),
+                callback_data=UserManagementCallback.create(
+                    level=9,  # Rejection reason input (FSM)
+                    operation=UserManagementOperation.REJECT_USER,
+                    user_id=user.id,
+                    filter_type=unpacked_cb.filter_type
+                ).pack()
+            )
+            kb_builder.adjust(2)
+
+        # Back button
+        kb_builder.row(InlineKeyboardButton(
+            text=Localizator.get_text(BotEntity.COMMON, "back_button"),
+            callback_data=UserManagementCallback.create(
+                level=5,  # Back to user list
+                operation=UserManagementOperation.USER_LIST,
+                page=unpacked_cb.page,
+                filter_type=unpacked_cb.filter_type
+            ).pack()
+        ))
+
+        return message, kb_builder
+
+    # === Registration Mode Toggle Methods ===
+
+    @staticmethod
+    async def get_registration_mode_selection(session: AsyncSession | Session) -> tuple[str, InlineKeyboardBuilder]:
+        """
+        Show all registration modes with current mode highlighted (bold + underline).
+        Level 13: Mode Selection
+        """
+        from repositories.system_settings import SystemSettingsRepository
+        from enums.registration_mode import RegistrationMode
+
+        current_mode = await SystemSettingsRepository.get_registration_mode(session)
+
+        kb_builder = InlineKeyboardBuilder()
+
+        # Iterate over enum and create buttons
+        for mode in RegistrationMode:
+            # Get localized mode name
+            mode_key = f"registration_mode_{mode.value}"
+            text = Localizator.get_text(BotEntity.ADMIN, mode_key)
+
+            # Highlight active mode with bold + underline
+            if mode == current_mode:
+                text = f"<b><u>{text}</u></b>"
+
+            kb_builder.button(
+                text=text,
+                callback_data=UserManagementCallback.create(
+                    level=14,
+                    operation=UserManagementOperation.SET_REGISTRATION_MODE,
+                    mode=mode.value
+                )
+            )
+
+        kb_builder.adjust(1)
+        kb_builder.row(InlineKeyboardButton(
+            text=Localizator.get_text(BotEntity.COMMON, "back_button"),
+            callback_data=UserManagementCallback.create(level=0).pack()
+        ))
+
+        message = Localizator.get_text(BotEntity.ADMIN, "registration_mode_selection_title")
+        return message, kb_builder
+
+    @staticmethod
+    async def get_registration_mode_preview(callback: CallbackQuery) -> tuple[str, InlineKeyboardBuilder]:
+        """
+        Show detailed preview of selected mode with example user message.
+        Level 14: Mode Preview + Confirmation
+        """
+        from enums.registration_mode import RegistrationMode
+
+        unpacked = UserManagementCallback.unpack(callback.data)
+        selected_mode = RegistrationMode(unpacked.mode)
+
+        # Get detailed description
+        preview_key = f"registration_mode_preview_{selected_mode.value}"
+        description = Localizator.get_text(BotEntity.ADMIN, preview_key)
+
+        # Build example user message
+        if selected_mode == RegistrationMode.OPEN:
+            example_msg = "ℹ️ <i>(Keine spezielle Nachricht - User sieht Shop direkt)</i>"
+        elif selected_mode == RegistrationMode.REQUEST_APPROVAL:
+            example_msg = Localizator.get_text(BotEntity.COMMON, "registration_pending").format(
+                support_link=config.SUPPORT_LINK if config.SUPPORT_LINK else "N/A"
+            )
+        elif selected_mode == RegistrationMode.CLOSED:
+            example_msg = Localizator.get_text(BotEntity.COMMON, "registration_waitlist")
+        else:
+            example_msg = "N/A"
+
+        message = description + "\n\n📱 <b>Beispiel - User sieht:</b>\n" + example_msg
+
+        kb_builder = InlineKeyboardBuilder()
+        kb_builder.button(
+            text=Localizator.get_text(BotEntity.ADMIN, "registration_mode_confirm"),
+            callback_data=UserManagementCallback.create(
+                level=15,
+                operation=UserManagementOperation.EXECUTE_SET_MODE,
+                mode=unpacked.mode
+            )
+        )
+        kb_builder.button(
+            text=Localizator.get_text(BotEntity.COMMON, "cancel_button"),
+            callback_data=UserManagementCallback.create(level=13, operation=UserManagementOperation.TOGGLE_REGISTRATION_MODE)
+        )
+        kb_builder.adjust(1)
+
+        return message, kb_builder
+
+    @staticmethod
+    async def set_registration_mode(callback: CallbackQuery, session: AsyncSession | Session) -> tuple[str, InlineKeyboardBuilder]:
+        """
+        Execute mode change and show success message.
+        Level 15: Execute Set Mode
+        """
+        from repositories.system_settings import SystemSettingsRepository
+        from enums.registration_mode import RegistrationMode
+        from db import session_commit
+
+        unpacked = UserManagementCallback.unpack(callback.data)
+        new_mode = RegistrationMode(unpacked.mode)
+
+        # Write to database
+        await SystemSettingsRepository.set("registration_mode", new_mode.value, session)
+        await session_commit(session)
+
+        # Get display name for success message
+        mode_key = f"registration_mode_{new_mode.value}"
+        mode_display = Localizator.get_text(BotEntity.ADMIN, mode_key)
+
+        message = Localizator.get_text(BotEntity.ADMIN, "registration_mode_success").format(
+            mode=mode_display
+        )
+
+        kb_builder = InlineKeyboardBuilder()
+        kb_builder.row(InlineKeyboardButton(
+            text=Localizator.get_text(BotEntity.COMMON, "back_button"),
+            callback_data=UserManagementCallback.create(level=0).pack()
+        ))
+
+        return message, kb_builder
