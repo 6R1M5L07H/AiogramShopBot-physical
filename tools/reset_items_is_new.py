@@ -7,7 +7,7 @@ in the database, for example after testing or when you want to manually
 control which items are announced as restocked.
 
 Usage:
-    python scripts/reset_items_is_new.py
+    python tools/reset_items_is_new.py
 """
 
 import asyncio
