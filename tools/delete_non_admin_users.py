@@ -41,7 +41,7 @@ sys.path.insert(0, str(project_root))
 
 import config
 from db import get_db_session, session_execute, session_commit
-from sqlalchemy import text, delete, select
+from sqlalchemy import text, delete, select, func, or_, update
 from models.user import User
 from models.cart import Cart
 from models.order import Order
@@ -109,46 +109,39 @@ async def get_user_data_stats(session, user_id: int) -> dict:
     """Get statistics about user's related data (for cascade preview)"""
     stats = {}
 
-    # Orders
-    result = await session_execute(
-        text("SELECT COUNT(*) FROM orders WHERE user_id = :user_id"),
-        session
-    )
+    # Orders - use SQLAlchemy ORM
+    stmt = select(func.count()).select_from(Order).where(Order.user_id == user_id)
+    result = await session_execute(stmt, session)
     stats['orders'] = result.scalar() or 0
 
-    # Cart items
-    result = await session_execute(
-        text("SELECT COUNT(*) FROM carts WHERE user_id = :user_id"),
-        session
-    )
+    # Cart items - use SQLAlchemy ORM
+    stmt = select(func.count()).select_from(Cart).where(Cart.user_id == user_id)
+    result = await session_execute(stmt, session)
     stats['cart_items'] = result.scalar() or 0
 
-    # Deposits
-    result = await session_execute(
-        text("SELECT COUNT(*) FROM deposit WHERE user_id = :user_id"),
-        session
-    )
+    # Deposits - use SQLAlchemy ORM
+    stmt = select(func.count()).select_from(Deposit).where(Deposit.user_id == user_id)
+    result = await session_execute(stmt, session)
     stats['deposits'] = result.scalar() or 0
 
-    # Strikes
-    result = await session_execute(
-        text("SELECT COUNT(*) FROM user_strikes WHERE user_id = :user_id"),
-        session
-    )
+    # Strikes - use SQLAlchemy ORM
+    stmt = select(func.count()).select_from(UserStrike).where(UserStrike.user_id == user_id)
+    result = await session_execute(stmt, session)
     stats['strikes'] = result.scalar() or 0
 
-    # Referrals given
-    result = await session_execute(
-        text("SELECT COUNT(*) FROM users WHERE referred_by_user_id = :user_id"),
-        session
-    )
+    # Referrals given - use SQLAlchemy ORM
+    stmt = select(func.count()).select_from(User).where(User.referred_by_user_id == user_id)
+    result = await session_execute(stmt, session)
     stats['referrals_given'] = result.scalar() or 0
 
-    # Referral usages
-    result = await session_execute(
-        text("SELECT COUNT(*) FROM referral_usages WHERE used_by_user_id = :user_id OR referral_owner_user_id = :user_id"),
-        session
+    # Referral usages - use SQLAlchemy ORM
+    stmt = select(func.count()).select_from(ReferralUsage).where(
+        or_(
+            ReferralUsage.used_by_user_id == user_id,
+            ReferralUsage.referral_owner_user_id == user_id
+        )
     )
+    result = await session_execute(stmt, session)
     stats['referral_usages'] = result.scalar() or 0
 
     return stats
@@ -167,61 +160,51 @@ async def delete_user_cascade(session, user_id: int, dry_run: bool = False) -> d
         return await get_user_data_stats(session, user_id)
 
     # Delete related data first (to avoid foreign key violations)
+    # Use SQLAlchemy ORM for dual-mode compatibility
 
     # 1. Cart items
-    result = await session_execute(
-        text("DELETE FROM carts WHERE user_id = :user_id"),
-        session
-    )
+    stmt = delete(Cart).where(Cart.user_id == user_id)
+    result = await session_execute(stmt, session)
     counts['cart_items'] = result.rowcount
 
     # 2. Orders (and related buyItems via CASCADE)
-    result = await session_execute(
-        text("DELETE FROM orders WHERE user_id = :user_id"),
-        session
-    )
+    stmt = delete(Order).where(Order.user_id == user_id)
+    result = await session_execute(stmt, session)
     counts['orders'] = result.rowcount
 
     # 3. Deposits
-    result = await session_execute(
-        text("DELETE FROM deposit WHERE user_id = :user_id"),
-        session
-    )
+    stmt = delete(Deposit).where(Deposit.user_id == user_id)
+    result = await session_execute(stmt, session)
     counts['deposits'] = result.rowcount
 
     # 4. User strikes
-    result = await session_execute(
-        text("DELETE FROM user_strikes WHERE user_id = :user_id"),
-        session
-    )
+    stmt = delete(UserStrike).where(UserStrike.user_id == user_id)
+    result = await session_execute(stmt, session)
     counts['strikes'] = result.rowcount
 
     # 5. Referral usages
-    result = await session_execute(
-        text("DELETE FROM referral_usages WHERE used_by_user_id = :user_id OR referral_owner_user_id = :user_id"),
-        session
+    stmt = delete(ReferralUsage).where(
+        or_(
+            ReferralUsage.used_by_user_id == user_id,
+            ReferralUsage.referral_owner_user_id == user_id
+        )
     )
+    result = await session_execute(stmt, session)
     counts['referral_usages'] = result.rowcount
 
     # 6. Referral discounts
-    result = await session_execute(
-        text("DELETE FROM referral_discounts WHERE user_id = :user_id"),
-        session
-    )
+    stmt = delete(ReferralDiscount).where(ReferralDiscount.user_id == user_id)
+    result = await session_execute(stmt, session)
     counts['referral_discounts'] = result.rowcount
 
     # 7. Update referred_by_user_id for users who were referred by this user
-    result = await session_execute(
-        text("UPDATE users SET referred_by_user_id = NULL WHERE referred_by_user_id = :user_id"),
-        session
-    )
+    stmt = update(User).where(User.referred_by_user_id == user_id).values(referred_by_user_id=None)
+    result = await session_execute(stmt, session)
     counts['referrals_updated'] = result.rowcount
 
     # 8. Finally, delete the user
-    result = await session_execute(
-        text("DELETE FROM users WHERE id = :user_id"),
-        session
-    )
+    stmt = delete(User).where(User.id == user_id)
+    result = await session_execute(stmt, session)
     counts['user'] = result.rowcount
 
     return counts
