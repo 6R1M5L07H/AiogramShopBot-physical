@@ -41,7 +41,7 @@ sys.path.insert(0, str(project_root))
 
 import config
 from db import get_db_session, session_execute, session_commit
-from sqlalchemy import text, delete
+from sqlalchemy import text, delete, select
 from models.user import User
 from models.cart import Cart
 from models.order import Order
@@ -70,39 +70,30 @@ async def get_users_to_delete(
     admin_ids = get_admin_ids()
 
     if delete_all:
-        # Get ALL non-admin users
-        query = text("""
-            SELECT id, telegram_id, telegram_username
-            FROM users
-            WHERE telegram_id NOT IN :admin_ids
-            ORDER BY id
-        """)
-        result = await session_execute(query.bindparams(admin_ids=tuple(admin_ids)), session)
+        # Get ALL non-admin users using SQLAlchemy ORM (works with sync and async)
+        stmt = select(User.id, User.telegram_id, User.telegram_username).where(
+            User.telegram_id.not_in(admin_ids)
+        ).order_by(User.id)
+        result = await session_execute(stmt, session)
         users = [(row[0], row[1], row[2], False) for row in result.fetchall()]
 
     elif telegram_ids:
-        # Get specific users by telegram_id (exclude admins)
-        query = text("""
-            SELECT id, telegram_id, telegram_username
-            FROM users
-            WHERE telegram_id IN :telegram_ids
-            ORDER BY id
-        """)
-        result = await session_execute(query.bindparams(telegram_ids=tuple(telegram_ids)), session)
+        # Get specific users by telegram_id using SQLAlchemy ORM
+        stmt = select(User.id, User.telegram_id, User.telegram_username).where(
+            User.telegram_id.in_(telegram_ids)
+        ).order_by(User.id)
+        result = await session_execute(stmt, session)
         users = []
         for row in result.fetchall():
             is_admin = row[1] in admin_ids
             users.append((row[0], row[1], row[2], is_admin))
 
     elif usernames:
-        # Get specific users by username (exclude admins)
-        query = text("""
-            SELECT id, telegram_id, telegram_username
-            FROM users
-            WHERE telegram_username IN :usernames
-            ORDER BY id
-        """)
-        result = await session_execute(query.bindparams(usernames=tuple(usernames)), session)
+        # Get specific users by username using SQLAlchemy ORM
+        stmt = select(User.id, User.telegram_id, User.telegram_username).where(
+            User.telegram_username.in_(usernames)
+        ).order_by(User.id)
+        result = await session_execute(stmt, session)
         users = []
         for row in result.fetchall():
             is_admin = row[1] in admin_ids
