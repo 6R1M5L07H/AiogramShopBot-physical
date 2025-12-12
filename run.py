@@ -70,6 +70,20 @@ async def start(message: types.Message, session: AsyncSession | Session):
         telegram_id=telegram_id
     ), session)
 
+    # Check if user is banned first
+    from repositories.user import UserRepository
+    user = await UserRepository.get_by_tgid(telegram_id, session)
+
+    if user and user.is_blocked:
+        # User is banned - show ban message
+        reason = user.blocked_reason if user.blocked_reason else "N/A"
+        message_text = Localizator.get_text(BotEntity.USER, "registration_rejected", lang=user_lang).format(
+            reason=reason,
+            support_link=SUPPORT_LINK if SUPPORT_LINK else "N/A"
+        )
+        await message.answer(message_text)
+        return
+
     # Check if user is approved (or admin - admins bypass approval)
     from utils.permission_utils import is_admin_user
     is_admin = is_admin_user(telegram_id)

@@ -1417,6 +1417,7 @@ class AdminService:
         """
         from datetime import datetime
         from bot import bot
+        from enums.approval_status import ApprovalStatus
 
         # Get FSM data
         data = await state.get_data()
@@ -1440,7 +1441,7 @@ class AdminService:
         user.is_blocked = True
         user.blocked_reason = f"Registration rejected: {rejection_reason}"
         user.blocked_at = datetime.now()
-        # Keep approval_status as PENDING for record keeping
+        user.approval_status = ApprovalStatus.REJECTED  # Remove from pending list
 
         await session_commit(session)
         await state.clear()
