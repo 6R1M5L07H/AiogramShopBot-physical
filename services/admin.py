@@ -1184,9 +1184,9 @@ class AdminService:
             mode_key = f"registration_mode_{mode.value}"
             text = Localizator.get_text(BotEntity.ADMIN, mode_key)
 
-            # Highlight active mode with bold + underline
+            # Highlight active mode with visual marker (buttons don't support HTML)
             if mode == current_mode:
-                text = f"<b><u>{text}</u></b>"
+                text = f"✓ {text}"
 
             kb_builder.button(
                 text=text,
