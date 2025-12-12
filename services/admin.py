@@ -1284,3 +1284,174 @@ class AdminService:
         ))
 
         return message, kb_builder
+
+    @staticmethod
+    async def approve_user(callback: CallbackQuery, session) -> tuple[str, InlineKeyboardBuilder]:
+        """
+        Approve a pending user.
+        Sets approval_status to APPROVED and sends notification to user.
+        Returns success message with back button.
+        """
+        from enums.approval_status import ApprovalStatus
+        from bot import bot
+        from callbacks import AllCategoriesCallback
+
+        unpacked = UserManagementCallback.unpack(callback.data)
+        user_id = unpacked.user_id
+
+        # Get user ORM object (not DTO) for modification
+        from sqlalchemy import select
+        from models.user import User
+        from db import session_execute
+
+        stmt = select(User).where(User.id == user_id)
+        result = await session_execute(stmt, session)
+        user = result.scalar()
+
+        if not user:
+            kb_builder = InlineKeyboardBuilder()
+            kb_builder.row(InlineKeyboardButton(
+                text=Localizator.get_text(BotEntity.COMMON, "back_button"),
+                callback_data=UserManagementCallback.create(
+                    level=10,
+                    operation=UserManagementOperation.USER_LIST,
+                    filter_type=ApprovalStatus.PENDING.value
+                ).pack()
+            ))
+            return Localizator.get_text(BotEntity.ADMIN, "user_not_found"), kb_builder
+
+        # Approve user
+        user.approval_status = ApprovalStatus.APPROVED
+        await session_commit(session)
+
+        # Send notification to user with main menu keyboard
+        try:
+            from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+
+            # Build main menu keyboard (same as /start handler)
+            keyboard = [
+                [
+                    KeyboardButton(text=Localizator.get_text(BotEntity.USER, "all_categories")),
+                    KeyboardButton(text=Localizator.get_text(BotEntity.USER, "my_profile"))
+                ],
+                [
+                    KeyboardButton(text=Localizator.get_text(BotEntity.USER, "faq")),
+                    KeyboardButton(text=Localizator.get_text(BotEntity.USER, "help"))
+                ],
+                [
+                    KeyboardButton(text=Localizator.get_text(BotEntity.USER, "cart")),
+                    KeyboardButton(text=Localizator.get_text(BotEntity.USER, "gpg_menu"))
+                ]
+            ]
+            reply_markup = ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
+            await bot.send_message(
+                user.telegram_id,
+                Localizator.get_text(BotEntity.USER, "registration_approved"),
+                reply_markup=reply_markup
+            )
+        except Exception:
+            pass  # User may have blocked bot
+
+        # Success message
+        message = Localizator.get_text(BotEntity.ADMIN, "approve_user_success")
+
+        kb_builder = InlineKeyboardBuilder()
+        kb_builder.row(InlineKeyboardButton(
+            text=Localizator.get_text(BotEntity.COMMON, "back_button"),
+            callback_data=UserManagementCallback.create(
+                level=10,
+                operation=UserManagementOperation.USER_LIST,
+                filter_type=unpacked.filter_type
+            ).pack()
+        ))
+
+        return message, kb_builder
+
+    @staticmethod
+    async def request_rejection_reason(callback: CallbackQuery, state: FSMContext) -> tuple[str, InlineKeyboardBuilder]:
+        """
+        Request admin to provide rejection reason.
+        Triggers FSM state for text input.
+        Returns message asking for reason + cancel button.
+        """
+        unpacked = UserManagementCallback.unpack(callback.data)
+        user_id = unpacked.user_id
+
+        # Store user_id in FSM for later
+        await state.update_data(reject_user_id=user_id)
+        await state.set_state(UserManagementStates.rejection_reason)
+
+        # Request reason
+        message = Localizator.get_text(BotEntity.ADMIN, "reject_user_reason_prompt")
+
+        kb_builder = InlineKeyboardBuilder()
+        kb_builder.row(InlineKeyboardButton(
+            text=Localizator.get_text(BotEntity.COMMON, "cancel_button"),
+            callback_data=UserManagementCallback.create(
+                level=10,
+                operation=UserManagementOperation.USER_LIST,
+                filter_type=unpacked.filter_type
+            ).pack()
+        ))
+
+        return message, kb_builder
+
+    @staticmethod
+    async def reject_user(message, state: FSMContext, session):
+        """
+        Execute user rejection (called from FSM handler when admin provides reason).
+
+        **Implementation Note:**
+        Instead of setting approval_status=REJECTED (permanent), we BAN the user.
+        This allows admins to later unban via the "Banned Users" list.
+
+        Process:
+        1. Set user.blocked = True
+        2. Set user.blocked_reason = rejection_reason
+        3. Set user.blocked_at = now
+        4. Keep approval_status = PENDING (for record keeping)
+        5. Send notification to user with rejection reason
+
+        Returns: Success message string
+        """
+        from datetime import datetime
+        from bot import bot
+
+        # Get FSM data
+        data = await state.get_data()
+        user_id = data.get("reject_user_id")
+        rejection_reason = message.text
+
+        # Get user ORM object (not DTO) for modification
+        from sqlalchemy import select
+        from models.user import User
+        from db import session_execute
+
+        stmt = select(User).where(User.id == user_id)
+        result = await session_execute(stmt, session)
+        user = result.scalar()
+
+        if not user:
+            await state.clear()
+            return Localizator.get_text(BotEntity.ADMIN, "user_not_found")
+
+        # Ban user (instead of setting REJECTED status)
+        user.blocked = True
+        user.blocked_reason = f"Registration rejected: {rejection_reason}"
+        user.blocked_at = datetime.now()
+        # Keep approval_status as PENDING for record keeping
+
+        await session_commit(session)
+        await state.clear()
+
+        # Send notification to user
+        try:
+            notification = Localizator.get_text(BotEntity.USER, "registration_rejected").format(
+                reason=rejection_reason
+            )
+            await bot.send_message(user.telegram_id, notification)
+        except Exception:
+            pass  # User may have blocked bot
+
+        return Localizator.get_text(BotEntity.ADMIN, "reject_user_success")

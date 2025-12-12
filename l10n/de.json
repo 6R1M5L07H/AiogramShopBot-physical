@@ -240,7 +240,10 @@
     "registration_mode_preview_request_approval": "⏳ <b>Genehmigung erforderlich</b>\n\nNeue Benutzer müssen manuell freigeschaltet werden. Benutzer erhält Nachricht mit Support-Link zur Kontaktaufnahme.\n\n<i>Voraussetzung: SUPPORT_LINK muss in .env gesetzt sein.</i>",
     "registration_mode_preview_closed": "🔒 <b>Geschlossen</b>\n\nKeine neuen Registrierungen möglich. Benutzer werden auf Warteliste gesetzt und können später per Batch-Freischaltung aktiviert werden.",
     "registration_mode_confirm": "✅ Bestätigen",
-    "registration_mode_success": "✅ Registrierungs-Modus auf <b>{mode}</b> gesetzt."
+    "registration_mode_success": "✅ Registrierungs-Modus auf <b>{mode}</b> gesetzt.",
+    "reject_user_reason_prompt": "✍️ <b>Ablehnungsgrund eingeben</b>\n\n📝 Bitte als Textnachricht den Grund für die Ablehnung senden.\n\n<i>Der Benutzer wird gesperrt und erhält eine Benachrichtigung mit dem angegebenen Grund.</i>\n\n💡 Zum Abbrechen den Button unten verwenden.",
+    "reject_user_success": "✅ Benutzer wurde gesperrt und benachrichtigt.",
+    "approve_user_success": "✅ Benutzer wurde freigeschaltet und benachrichtigt."
   },
   "common": {
     "back_button": "⬅️ Zurück",
@@ -620,7 +623,7 @@
     "pgp_key_not_configured": "⚠️ <b>PGP-Schlüssel nicht konfiguriert</b>\n\nDer Shop-Betreiber hat noch keinen öffentlichen PGP-Schlüssel hinterlegt. Bitte kontaktiere den Support.",
     "registration_pending": "⏳ Account wartet auf Freischaltung\n\nFür Zugriff bitte beim Support melden und kurz vorstellen.\n\n🔗 Support kontaktieren:\n{support_link}\n\nBenachrichtigung erfolgt nach Freischaltung.",
     "registration_waitlist": "🔒 Registrierungen derzeit geschlossen\n\nShop akzeptiert momentan keine neuen Accounts. Aufnahme auf Warteliste erfolgt.\n\n📬 Benachrichtigung wird versendet, sobald Plätze verfügbar sind.",
-    "registration_approved": "✅ Account freigeschaltet\n\nWillkommen! Shop kann nun genutzt werden.\n\nViel Spaß beim Stöbern! 🛍️",
+    "registration_approved": "✅ Registrierung genehmigt!\n\nZum Starten einen der unten angezeigten Buttons anklicken oder /start an den Bot senden.",
     "registration_rejected": "❌ Registrierung abgelehnt\n\nAnfrage wurde leider abgelehnt.\n\n📝 Grund:\n{reason}\n\n🔗 Support kontaktieren:\n{support_link}",
     "access_denied": "🚫 <b>Zugriff verweigert</b>\n\n{message}"
   }
