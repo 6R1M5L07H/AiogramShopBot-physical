@@ -257,6 +257,38 @@ async def level_4_router(**kwargs):
             await callback.message.edit_text(text=msg, reply_markup=kb_builder.as_markup())
 
 
+async def user_list(**kwargs):
+    """Level 10: Show user list (pending/waitlist/banned)."""
+    callback = kwargs.get("callback")
+    session = kwargs.get("session")
+    msg, kb_builder = await AdminService.get_user_list_view(callback, session)
+    await callback.message.edit_text(text=msg, reply_markup=kb_builder.as_markup(), parse_mode="HTML")
+
+
+async def user_detail(**kwargs):
+    """Level 11: Show user detail view."""
+    callback = kwargs.get("callback")
+    session = kwargs.get("session")
+    msg, kb_builder = await AdminService.get_user_detail_view(callback, session)
+    await callback.message.edit_text(text=msg, reply_markup=kb_builder.as_markup(), parse_mode="HTML")
+
+
+async def user_action(**kwargs):
+    """Level 12: Execute user action (approve/reject)."""
+    callback = kwargs.get("callback")
+    session = kwargs.get("session")
+    state = kwargs.get("state")
+    unpacked_cb = UserManagementCallback.unpack(callback.data)
+
+    if unpacked_cb.operation == UserManagementOperation.APPROVE_USER:
+        msg, kb_builder = await AdminService.approve_user(callback, session)
+        await callback.message.edit_text(text=msg, reply_markup=kb_builder.as_markup(), parse_mode="HTML")
+    elif unpacked_cb.operation == UserManagementOperation.REJECT_USER:
+        # Rejection requires reason input - use existing FSM flow
+        msg, kb_builder = await AdminService.request_rejection_reason(callback, state)
+        await callback.message.edit_text(text=msg, reply_markup=kb_builder.as_markup(), parse_mode="HTML")
+
+
 async def registration_mode_selection(**kwargs):
     """Level 13: Show registration mode selection menu."""
     callback = kwargs.get("callback")
@@ -292,6 +324,9 @@ async def inventory_management_navigation(callback: CallbackQuery, state: FSMCon
         2: level_2_router,  # Routes based on operation: UNBAN_USER → banned list, else → refund buy
         3: level_3_router,  # Routes based on operation: UNBAN_USER → detail, else → refund_confirmation
         4: level_4_router,  # Routes based on operation: UNBAN_USER → confirmation/execute
+        10: user_list,       # Show user list (pending/waitlist/banned)
+        11: user_detail,     # Show user detail view
+        12: user_action,     # Execute user action (approve/reject)
         13: registration_mode_selection,  # Show registration mode selection menu
         14: registration_mode_preview,    # Show preview of selected registration mode
         15: registration_mode_execute     # Execute registration mode change

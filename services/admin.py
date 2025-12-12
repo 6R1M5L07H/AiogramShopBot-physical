@@ -222,6 +222,17 @@ class AdminService:
             )
         )
 
+        # NEW: User List Button (show pending users by default)
+        from enums.approval_status import ApprovalStatus
+        kb_builder.button(
+            text=Localizator.get_text(BotEntity.ADMIN, "user_list_button"),
+            callback_data=UserManagementCallback.create(
+                level=10,
+                operation=UserManagementOperation.USER_LIST,
+                filter_type=ApprovalStatus.PENDING.value
+            )
+        )
+
         # Existing buttons
         kb_builder.button(text=Localizator.get_text(BotEntity.ADMIN, "credit_management"),
                           callback_data=UserManagementCallback.create(1))
