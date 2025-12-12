@@ -134,15 +134,17 @@ async def get_user_data_stats(session, user_id: int) -> dict:
     result = await session_execute(stmt, session)
     stats['referrals_given'] = result.scalar() or 0
 
-    # Referral usages - use SQLAlchemy ORM
-    stmt = select(func.count()).select_from(ReferralUsage).where(
-        or_(
-            ReferralUsage.used_by_user_id == user_id,
-            ReferralUsage.referral_owner_user_id == user_id
-        )
-    )
+    # Referral usages - count via order_id lookup
+    stmt = select(Order.id).where(Order.user_id == user_id)
     result = await session_execute(stmt, session)
-    stats['referral_usages'] = result.scalar() or 0
+    order_ids = [row[0] for row in result.fetchall()]
+
+    if order_ids:
+        stmt = select(func.count()).select_from(ReferralUsage).where(ReferralUsage.order_id.in_(order_ids))
+        result = await session_execute(stmt, session)
+        stats['referral_usages'] = result.scalar() or 0
+    else:
+        stats['referral_usages'] = 0
 
     return stats
 
@@ -167,30 +169,33 @@ async def delete_user_cascade(session, user_id: int, dry_run: bool = False) -> d
     result = await session_execute(stmt, session)
     counts['cart_items'] = result.rowcount
 
-    # 2. Orders (and related buyItems via CASCADE)
+    # 2. Referral usages (must delete BEFORE orders due to FK constraint)
+    # Get order IDs first, then delete referral_usages by order_id
+    stmt = select(Order.id).where(Order.user_id == user_id)
+    result = await session_execute(stmt, session)
+    order_ids = [row[0] for row in result.fetchall()]
+
+    if order_ids:
+        stmt = delete(ReferralUsage).where(ReferralUsage.order_id.in_(order_ids))
+        result = await session_execute(stmt, session)
+        counts['referral_usages'] = result.rowcount
+    else:
+        counts['referral_usages'] = 0
+
+    # 3. Orders (and related buyItems via CASCADE)
     stmt = delete(Order).where(Order.user_id == user_id)
     result = await session_execute(stmt, session)
     counts['orders'] = result.rowcount
 
-    # 3. Deposits
+    # 4. Deposits
     stmt = delete(Deposit).where(Deposit.user_id == user_id)
     result = await session_execute(stmt, session)
     counts['deposits'] = result.rowcount
 
-    # 4. User strikes
+    # 5. User strikes
     stmt = delete(UserStrike).where(UserStrike.user_id == user_id)
     result = await session_execute(stmt, session)
     counts['strikes'] = result.rowcount
-
-    # 5. Referral usages
-    stmt = delete(ReferralUsage).where(
-        or_(
-            ReferralUsage.used_by_user_id == user_id,
-            ReferralUsage.referral_owner_user_id == user_id
-        )
-    )
-    result = await session_execute(stmt, session)
-    counts['referral_usages'] = result.rowcount
 
     # 6. Referral discounts
     stmt = delete(ReferralDiscount).where(ReferralDiscount.user_id == user_id)
