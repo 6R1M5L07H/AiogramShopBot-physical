@@ -1407,7 +1407,7 @@ class AdminService:
         This allows admins to later unban via the "Banned Users" list.
 
         Process:
-        1. Set user.blocked = True
+        1. Set user.is_blocked = True
         2. Set user.blocked_reason = rejection_reason
         3. Set user.blocked_at = now
         4. Keep approval_status = PENDING (for record keeping)
@@ -1437,7 +1437,7 @@ class AdminService:
             return Localizator.get_text(BotEntity.ADMIN, "user_not_found")
 
         # Ban user (instead of setting REJECTED status)
-        user.blocked = True
+        user.is_blocked = True
         user.blocked_reason = f"Registration rejected: {rejection_reason}"
         user.blocked_at = datetime.now()
         # Keep approval_status as PENDING for record keeping
@@ -1448,10 +1448,13 @@ class AdminService:
         # Send notification to user
         try:
             notification = Localizator.get_text(BotEntity.USER, "registration_rejected").format(
-                reason=rejection_reason
+                reason=rejection_reason,
+                support_link=config.SUPPORT_LINK if config.SUPPORT_LINK else "N/A"
             )
             await bot.send_message(user.telegram_id, notification)
-        except Exception:
-            pass  # User may have blocked bot
+        except Exception as e:
+            # Log but don't fail if user blocked bot
+            import logging
+            logging.warning(f"Failed to send rejection notification to user {user.telegram_id}: {e}")
 
         return Localizator.get_text(BotEntity.ADMIN, "reject_user_success")
